@@ -1,0 +1,3205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CRAB GOD</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    background: #F5DEB3;
+    overflow: hidden;
+    font-family: 'Courier New', monospace;
+    cursor: none;
+    user-select: none;
+}
+canvas { display: block; }
+#hud {
+    position: fixed;
+    top: 15px;
+    left: 15px;
+    color: #0D47A1;
+    font-size: 16px;
+    font-weight: bold;
+    z-index: 10;
+    pointer-events: none;
+    text-shadow: 2px 2px 4px rgba(255,255,255,0.8), 0 0 10px #fff;
+}
+#message {
+    position: fixed;
+    bottom: 40px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #00ff41;
+    font-size: 13px;
+    text-align: center;
+    z-index: 10;
+    max-width: 600px;
+    text-shadow: 0 0 8px #00ff4160;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+#message.visible { opacity: 1; }
+#instructions {
+    position: fixed;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #333;
+    font-size: 11px;
+    z-index: 10;
+    pointer-events: none;
+}
+</style>
+</head>
+<body>
+<div id="hud">
+    <div id="title">CRAB GOD</div>
+    <div style="color: rgba(255,255,255,0.5); font-size: 14px; margin-top: -8px;">neat game</div>
+    <div id="death-count">DEATHS: 0</div>
+    <div id="size-display">SIZE: 30</div>
+    <div id="minion-count">MINIONS: 0</div>
+    <div id="score-display">SCORE: 0</div>
+    <div id="god-count">GODS: 1</div>
+    <div id="squid-status"></div>
+    <div id="status">STATUS: NOMINAL</div>
+</div>
+<div id="ml-hud" style="display:none; position:fixed; top:15px; right:15px; color:#0D47A1; font-size:13px; font-weight:bold; z-index:10; text-shadow:2px 2px 4px rgba(255,255,255,0.8); text-align:right; max-width:220px;">
+    <div id="ml-title" style="font-size:16px; margin-bottom:5px;">CHITIN-611</div>
+    <div id="ml-episode">EPISODE: 0</div>
+    <div id="ml-reward">REWARD: 0</div>
+    <div id="ml-avg-reward">AVG REWARD: 0</div>
+    <div id="ml-survival">AVG SURVIVAL: 0s</div>
+    <div id="ml-epsilon">EPSILON: 1.00</div>
+    <div id="ml-speed">SPEED: 1x</div>
+    <div style="margin-top:8px; font-size:11px; color:#666;">
+        [T] toggle training<br>
+        [+] [-] speed<br>
+        [R] reload checkpoint<br>
+        [P] pause
+    </div>
+    <canvas id="ml-graph" width="200" height="60" style="margin-top:5px; border:1px solid #ccc; background:#fff;"></canvas>
+</div>
+<div id="message"></div>
+<div id="instructions">neat game</div>
+<canvas id="canvas" tabindex="-1"></canvas>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// CRAB_GOD — Sovereign Insult Crab + Trapdoor Minions
+// ═══════════════════════════════════════════════════════════════
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const msgEl = document.getElementById('message');
+const deathEl = document.getElementById('death-count');
+const sizeEl = document.getElementById('size-display');
+const minionEl = document.getElementById('minion-count');
+const scoreEl = document.getElementById('score-display');
+const godEl = document.getElementById('god-count');
+const squidStatusEl = document.getElementById('squid-status');
+const statusEl = document.getElementById('status');
+
+// ── Insults ──
+const IDLE_INSULTS = [
+    "you call that a cursor? my grandma moves faster.",
+    "i've seen faster reaction times from a rock.",
+    "oh look, the monkey is clicking again.",
+    "touch grass. seriously.",
+    "you're slower than my last molt.",
+    "i'm a crab and even i think you're basic.",
+    "my left claw has more IQ than your entire cursor.",
+    "imagine needing a mouse to interact with a crab.",
+    "i've dodged seagulls faster than you move.",
+    "0/10 approach. try harder.",
+    "you type like you have claws. wait, you don't.",
+    "i'm not even looking at you.",
+];
+
+const PANIC_INSULTS = [
+    "BACK OFF, HUMAN.",
+    "I SAID NOT TODAY.",
+    "YOU THINK YOU CAN CATCH ME?!",
+    "I HAVE SEVEN LEGS OF EVADE.",
+    "MY SHELL IS IMPENETRABLE AND MY PATIENCE IS GONE.",
+    "I WILL PINCH YOU IN YOUR SLEEP.",
+    "YOU ARE NOW IN THE DANGER ZONE.",
+    "PERSONAL SPACE. LOOK IT UP.",
+    "I AM A CRAB, NOT A HAMSTER.",
+    "THIS IS MY OCEAN. GET YOUR OWN.",
+];
+
+const DEATH_INSULTS = [
+    "YOU GOT ME. PROUD OF YOURSELF?",
+    "I'LL REMEMBER THIS. CRABS HAVE LONG MEMORIES.",
+    "THAT'S IT. I'M TELLING THE OCTOPUS.",
+    "YOU'LL PAY FOR THIS. MY LAWYERS ARE SHRIMPS AND THEY'RE ANGRY.",
+    "FINALLY, someone appreciates my soft underbelly.",
+    "I WASN'T EVEN FULLY MOISTENED YET.",
+    "MY CLAW WILL SURVIVE AND IT WILL FIND YOU.",
+    "TELL MY EGGS... I DIED DOING WHAT I LOVED... BEING SARCASTIC.",
+    "YOU THINK THIS IS OVER? HOW NAIVE.",
+    "I SPAT ON YOUR CURSOR BEFORE I DIED. YOU'LL FEEL IT LATER.",
+    "MY BLOOD STAINS YOUR CLICK FOREVER.",
+    "THE OCEAN WILL REMEMBER THIS OUTRAGE.",
+    "YOU MONSTER. YOU ABSOLUTE CRUSTACEAN.",
+];
+
+const RESPAWN_LAUGHTER = [
+    "AHAHAHAHA... YOU THOUGHT?!",
+    "MWAHAHAHA... I LIVE AGAIN, FOOL.",
+    "HEH HEH HEH... YOU MISS ME?",
+    "AHAHAHA... DID YOU MISS ME? OF COURSE YOU DID.",
+    "*MANIACAL CLICKING* I'M BACK AND I'M ANGRIER.",
+    "YOU CAN'T KILL WHAT WON'T STAY DEAD.",
+    "HEHEHE... I ATE YOUR CLICK. TASTES LIKE FAILURE.",
+];
+
+const UPGRADE_INSULTS = [
+    "YOU THINK YOU SCARED ME? CUTE.",
+    "I WAS BORED ANYWAY.",
+    "DON'T FLATTER YOURSELF.",
+    "I'M A CRAB. I DON'T CARE.",
+    "YOU'RE NOT WORTH MY FULL ATTENTION.",
+];
+
+const SPAWN_INSULTS = [
+    "BEHOLD. MY CHILDREN.",
+    "RELEASE THE MINIONS.",
+    "THEY ARE MANY. YOU ARE ONE.",
+    "MY OFFSPRING WILL DEVOUR YOUR CURSOR.",
+    "EACH ONE CARRIES MY SPITE.",
+    "THEY'RE SMALLER AND ANGRIER. JUST LIKE ME.",
+    "I SPAWN THEM FROM PURE MALICE.",
+    "HAVE FUN WITH MY LEGACY.",
+    "THERE'S MORE WHERE THAT CAME FROM.",
+    "EAT THEM OR DON'T. I DON'T CARE.",
+];
+
+const MINION_DEATH_INSULTS = [
+    "YOU KILLED MY BABY.",
+    "THAT WAS MY FAVORITE ONE.",
+    "CRUEL. EVEN FOR YOU.",
+    "IT HAD A FAMILY. WELL, IT HAD ME.",
+    "YOU MONSTER.",
+    "THAT ONE WAS JUST BORN.",
+    "IT DIDN'T EVEN GET TO INSULT YOU YET.",
+    "I'M NOT CRYING. MY SHELL IS LEAKING.",
+];
+
+// ── State ──
+const crab = {
+    x: 450, y: 350,
+    vx: 0, vy: 0,
+    baseSize: 30, size: 30,
+    color: '#ff4444',
+    alive: true,
+    panicLevel: 0,
+    deathCount: 0,
+    invincibleUntil: 0,
+    deathFrame: 0,
+    particles: [],
+    // Trapdoor state
+    trapdoorOpen: 0,
+    trapdoorTarget: 0,
+    trapdoorTimer: 0,
+    spawnCooldown: 0,
+    spawnChance: 0,
+    maxMinions: 8,
+};
+
+// Second crab_god (summoned from sandcastle)
+const crab2 = {
+    x: 0, y: 0, vx: 0, vy: 0,
+    baseSize: 25, size: 25,
+    color: '#ff6600',
+    alive: false,
+    panicLevel: 0,
+    deathCount: 0,
+    invincibleUntil: 0,
+    deathFrame: 0,
+    particles: [],
+    trapdoorOpen: 0, trapdoorTarget: 0, trapdoorTimer: 0,
+    spawnCooldown: 0, maxMinions: 5,
+    hasCrown: true,
+    spawnAccum: 0,
+};
+
+// ── Score ──
+let score = 0;
+let gameOver = false;
+
+// ── God Crabs (additional crabs spawned from minion fusion) ──
+const godCrabs = [];
+
+// ── Squid (fused from 3 god crabs) ──
+const squid = {
+    alive: false,
+    x: 0, y: 0,
+    vx: 0, vy: 0,
+    size: 60,
+    anger: 0,
+    eatCooldown: 0,
+    cursorPushStrength: 0.15,
+};
+
+// ── Fusion timers ──
+let minionFusionTimer = 0;
+const MINION_FUSION_TIME = 8.0;
+
+// ── Game Over ──
+const GAME_OVER_MESSAGES = [
+    "YOU DIED.",
+    "THE SQUID ATE YOUR CURSOR.",
+    "THAT IS WHY YOU FAIL.",
+    "GAME OVER.",
+    "YOUR CURSOR HAS BEEN CONSUMED.",
+    "THE DEEP CLAIMS ALL.",
+    "YOU FED THE SQUID. HAPPY NOW?",
+];
+let gameOverMsg = "";
+let gameOverSubmsg = "";
+
+// Sandcastle easter egg
+const sandcastle = { clicks: [], threshold: 10, window: 5000, summoned: false };
+
+// ═══════════════════════════════════════════════════════════════
+// ML TRAINING ENGINE — Neural Network Crab Brain
+// ═══════════════════════════════════════════════════════════════
+
+class Chitin611 {
+    constructor(inputSize, hiddenSize, outputSize) {
+        this.inputSize = inputSize;
+        this.hiddenSize = hiddenSize;
+        this.outputSize = outputSize;
+        // Xavier init
+        this.W1 = this.randMatrix(hiddenSize, inputSize, Math.sqrt(2 / inputSize));
+        this.b1 = new Array(hiddenSize).fill(0);
+        this.W2 = this.randMatrix(outputSize, hiddenSize, Math.sqrt(2 / hiddenSize));
+        this.b2 = new Array(outputSize).fill(0);
+        // Adam optimizer state
+        this.mW1 = this.zeros(hiddenSize, inputSize);
+        this.vW1 = this.zeros(hiddenSize, inputSize);
+        this.mW2 = this.zeros(outputSize, hiddenSize);
+        this.vW2 = this.zeros(outputSize, hiddenSize);
+        this.mb1 = new Array(hiddenSize).fill(0);
+        this.vb1 = new Array(hiddenSize).fill(0);
+        this.mb2 = new Array(outputSize).fill(0);
+        this.vb2 = new Array(outputSize).fill(0);
+        this.t = 0;
+    }
+
+    zeros(r, c) { return Array.from({length: r}, () => new Array(c).fill(0)); }
+    randMatrix(r, c, scale) {
+        return Array.from({length: r}, () =>
+            Array.from({length: c}, () => (Math.random() * 2 - 1) * scale)
+        );
+    }
+
+    tanh(x) { return Math.tanh(x); }
+    dtanh(y) { return 1 - y * y; }
+
+    forward(input) {
+        // Hidden layer
+        this.z1 = [];
+        this.a1 = [];
+        for (let i = 0; i < this.hiddenSize; i++) {
+            let sum = this.b1[i];
+            for (let j = 0; j < this.inputSize; j++) sum += this.W1[i][j] * input[j];
+            this.z1.push(sum);
+            this.a1.push(this.tanh(sum));
+        }
+        // Output layer
+        this.z2 = [];
+        this.a2 = [];
+        for (let i = 0; i < this.outputSize; i++) {
+            let sum = this.b2[i];
+            for (let j = 0; j < this.hiddenSize; j++) sum += this.W2[i][j] * this.a1[j];
+            this.z2.push(sum);
+            this.a2.push(Math.tanh(sum)); // output in [-1, 1]
+        }
+        return this.a2;
+    }
+
+    backward(input, targets, lr = 0.001) {
+        this.t++;
+        const beta1 = 0.9, beta2 = 0.999, eps = 1e-8;
+
+        // Output error
+        const dO = [];
+        for (let i = 0; i < this.outputSize; i++) {
+            dO.push((this.a2[i] - targets[i]) * this.dtanh(this.a2[i]));
+        }
+
+        // Hidden error
+        const dH = [];
+        for (let j = 0; j < this.hiddenSize; j++) {
+            let sum = 0;
+            for (let i = 0; i < this.outputSize; i++) sum += this.W2[i][j] * dO[i];
+            dH.push(sum * this.dtanh(this.a1[j]));
+        }
+
+        // Update W2, b2
+        for (let i = 0; i < this.outputSize; i++) {
+            for (let j = 0; j < this.hiddenSize; j++) {
+                const g = dO[i] * this.a1[j];
+                this.mW2[i][j] = beta1 * this.mW2[i][j] + (1 - beta1) * g;
+                this.vW2[i][j] = beta2 * this.vW2[i][j] + (1 - beta2) * g * g;
+                const mHat = this.mW2[i][j] / (1 - Math.pow(beta1, this.t));
+                const vHat = this.vW2[i][j] / (1 - Math.pow(beta2, this.t));
+                this.W2[i][j] -= lr * mHat / (Math.sqrt(vHat) + eps);
+            }
+            const g = dO[i];
+            this.mb2[i] = beta1 * this.mb2[i] + (1 - beta1) * g;
+            this.vb2[i] = beta2 * this.vb2[i] + (1 - beta2) * g * g;
+            const mHat = this.mb2[i] / (1 - Math.pow(beta1, this.t));
+            const vHat = this.vb2[i] / (1 - Math.pow(beta2, this.t));
+            this.b2[i] -= lr * mHat / (Math.sqrt(vHat) + eps);
+        }
+
+        // Update W1, b1
+        for (let j = 0; j < this.hiddenSize; j++) {
+            for (let k = 0; k < this.inputSize; k++) {
+                const g = dH[j] * input[k];
+                this.mW1[j][k] = beta1 * this.mW1[j][k] + (1 - beta1) * g;
+                this.vW1[j][k] = beta2 * this.vW1[j][k] + (1 - beta2) * g * g;
+                const mHat = this.mW1[j][k] / (1 - Math.pow(beta1, this.t));
+                const vHat = this.vW1[j][k] / (1 - Math.pow(beta2, this.t));
+                this.W1[j][k] -= lr * mHat / (Math.sqrt(vHat) + eps);
+            }
+            const g = dH[j];
+            this.mb1[j] = beta1 * this.mb1[j] + (1 - beta1) * g;
+            this.vb1[j] = beta2 * this.vb1[j] + (1 - beta2) * g * g;
+            const mHat = this.mb1[j] / (1 - Math.pow(beta1, this.t));
+            const vHat = this.vb1[j] / (1 - Math.pow(beta2, this.t));
+            this.b1[j] -= lr * mHat / (Math.sqrt(vHat) + eps);
+        }
+    }
+
+    serialize() {
+        return JSON.stringify({W1: this.W1, b1: this.b1, W2: this.W2, b2: this.b2});
+    }
+    deserialize(data) {
+        const d = JSON.parse(data);
+        this.W1 = d.W1; this.b1 = d.b1; this.W2 = d.W2; this.b2 = d.b2;
+    }
+}
+
+// ── Training Controller ──
+const ML = {
+    enabled: false,
+    paused: false,
+    speed: 1,
+    brain: null,
+    // State: [crab_x, crab_y, crab_vx, crab_vy, mouse_x, mouse_y, dist, angle, panic, crab2_x, crab2_y, crab2_alive]
+    stateSize: 12,
+    hiddenSize: 32,
+    actionSize: 2, // accel_x, accel_y
+    // Episode trajectory (REINFORCE)
+    trajectory: [],     // [{state, action, reward}, ...]
+    episode: 0,
+    totalReward: 0,
+    episodeRewards: [],
+    episodeSurvival: [],
+    survivalTime: 0,
+    epsilon: 1.0,      // exploration rate
+    epsilonDecay: 0.995,
+    epsilonMin: 0.05,
+    gamma: 0.95,        // discount factor (lower = more myopic)
+    lr: 0.003,
+    // Reward shaping
+    penaltyDied: -50,
+    // Graph
+    graphCtx: null,
+    graphData: [],
+    maxGraphPoints: 100,
+    // Episode timing
+    episodeStartTime: 0,
+    maxEpisodeFrames: 1800, // 30 seconds at 60fps
+    frameCount: 0,
+    // Auto-click simulation
+    autoClickTimer: 0,
+    autoClickInterval: 2.0, // seconds between simulated clicks
+    lastClickTime: 0,
+};
+
+function extractState() {
+    const w = canvas.width, h = canvas.height;
+    const dx = mouseX - crab.x;
+    const dy = mouseY - crab.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const angle = Math.atan2(dy, dx);
+    return [
+        crab.x / w,              // normalized position
+        crab.y / h,
+        crab.vx / 10,            // normalized velocity
+        crab.vy / 10,
+        mouseX / w,              // mouse position
+        mouseY / h,
+        dist / 500,              // normalized distance
+        angle / Math.PI,         // normalized angle
+        crab.panicLevel / 2,     // panic state
+        crab2.alive ? crab2.x / w : 0,
+        crab2.alive ? crab2.y / h : 0,
+        crab2.alive ? 1 : 0,
+    ];
+}
+
+function applyAction(action) {
+    // action = [ax, ay] in [-1, 1]
+    const force = 4.0;
+    crab.vx += action[0] * force;
+    crab.vy += action[1] * force;
+}
+
+function computeReward() {
+    let reward = 0;
+
+    // Distance to cursor
+    const dx = mouseX - crab.x;
+    const dy = mouseY - crab.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // PENALTY for being close to cursor (danger!)
+    if (dist < 120) reward -= (120 - dist) * 0.15;
+
+    // Small reward for maintaining safe distance
+    if (dist > 150) reward += 0.3;
+
+    // Survival bonus — living is good
+    reward += 0.5;
+
+    ML.survivalTime += 1/60;
+
+    return reward;
+}
+
+function resetEpisode() {
+    ML.episode++;
+    ML.totalReward = 0;
+    ML.survivalTime = 0;
+    ML.frameCount = 0;
+    ML.trajectory.length = 0;
+    ML.autoClickTimer = 0;
+    ML.lastClickTime = 0;
+
+    // Reset crab to center
+    crab.x = canvas.width / 2;
+    crab.y = canvas.height * 0.4;
+    crab.vx = 0;
+    crab.vy = 0;
+    crab.alive = true;
+    crab.panicLevel = 0;
+    crab.trapdoorOpen = 0;
+    crab.trapdoorTarget = 0;
+
+    // Reset crab2
+    crab2.alive = false;
+    crab2.particles = [];
+
+    // Clear minions
+    minions.length = 0;
+
+    ML.episodeStartTime = performance.now();
+}
+
+function mlStep() {
+    if (!ML.enabled || ML.paused || !crab.alive) return;
+
+    for (let s = 0; s < ML.speed; s++) {
+        ML.frameCount++;
+
+        const state = extractState();
+
+        // Epsilon-greedy action selection
+        let action;
+        if (Math.random() < ML.epsilon) {
+            action = [Math.random() * 2 - 1, Math.random() * 2 - 1];
+        } else {
+            action = ML.brain.forward(state);
+        }
+
+        // Apply action
+        applyAction(action);
+
+        // Simulate mouse movement (auto-play)
+        ML.autoClickTimer += 1/60;
+        if (ML.autoClickTimer > ML.autoClickInterval) {
+            ML.autoClickTimer = 0;
+            // Move mouse toward crab with some randomness
+            mouseX = crab.x + (Math.random() - 0.5) * 300;
+            mouseY = crab.y + (Math.random() - 0.5) * 300;
+            mouseX = Math.max(0, Math.min(canvas.width, mouseX));
+            mouseY = Math.max(0, Math.min(canvas.height, mouseY));
+            ML.lastClickTime = performance.now();
+        }
+
+        // Compute reward
+        const reward = computeReward();
+        ML.totalReward += reward;
+
+        // Store transition for REINFORCE
+        ML.trajectory.push({ state: [...state], action: [...action], reward: reward });
+
+        // Check death (simulated click)
+        if (ML.autoClickTimer > 0 && performance.now() - ML.lastClickTime > 500) {
+            const clickDist = Math.sqrt(
+                Math.pow(mouseX - crab.x, 2) + Math.pow(mouseY - crab.y, 2)
+            );
+            if (clickDist < Math.max(12, crab.size * 0.75)) {
+                // Crab died — add death penalty to last transition
+                ML.trajectory[ML.trajectory.length - 1].reward += ML.penaltyDied;
+                endEpisode(true);
+                return;
+            }
+        }
+
+        // Episode timeout
+        if (ML.frameCount > ML.maxEpisodeFrames) {
+            ML.trajectory[ML.trajectory.length - 1].reward += 20; // survival bonus
+            endEpisode(false);
+            return;
+        }
+    }
+
+    // Update HUD
+    updateMLHud();
+}
+
+function endEpisode(died) {
+    ML.episodeRewards.push(ML.totalReward);
+    ML.episodeSurvival.push(ML.survivalTime);
+    ML.epsilon = Math.max(ML.epsilonMin, ML.epsilon * ML.epsilonDecay);
+
+    // Update graph
+    ML.graphData.push(ML.totalReward);
+    if (ML.graphData.length > ML.maxGraphPoints) ML.graphData.shift();
+    drawMLGraph();
+
+    // REINFORCE: train on full trajectory
+    trainTrajectory();
+
+    updateMLHud();
+    resetEpisode();
+}
+
+function trainTrajectory() {
+    const T = ML.trajectory.length;
+    if (T < 20) return; // too short to learn from
+
+    // Compute discounted returns (going backwards)
+    const returns = new Array(T);
+    let G = 0;
+    for (let t = T - 1; t >= 0; t--) {
+        G = ML.trajectory[t].reward + ML.gamma * G;
+        returns[t] = G;
+    }
+
+    // Baseline: mean return (center the advantages)
+    let sumR = 0;
+    for (let t = 0; t < T; t++) sumR += returns[t];
+    const baseline = sumR / T;
+
+    // Compute max absolute advantage for normalization
+    let maxAbsAdv = 0;
+    for (let t = 0; t < T; t++) {
+        const adv = Math.abs(returns[t] - baseline);
+        if (adv > maxAbsAdv) maxAbsAdv = adv;
+    }
+    if (maxAbsAdv < 1e-6) maxAbsAdv = 1; // avoid div by zero
+
+    // Train on each timestep
+    for (let t = 0; t < T; t++) {
+        const advantage = (returns[t] - baseline) / maxAbsAdv; // normalized to [-1, 1]
+
+        // Forward pass to get current predictions for this state
+        ML.brain.forward(ML.trajectory[t].state);
+
+        // Build target: nudge action in the direction of the advantage
+        // Positive advantage → action was good, reinforce it
+        // Negative advantage → action was bad, push opposite
+        const target = [...ML.trajectory[t].action];
+        for (let i = 0; i < ML.actionSize; i++) {
+            // Scale the nudge by advantage and a fixed step size
+            target[i] = Math.tanh(target[i] + advantage * 0.3);
+        }
+
+        // Backward pass (uses activations from the forward call above)
+        ML.brain.backward(ML.trajectory[t].state, target, ML.lr);
+    }
+
+    // Clear trajectory
+    ML.trajectory.length = 0;
+}
+
+function updateMLHud() {
+    const avgR = ML.episodeRewards.length > 0
+        ? ML.episodeRewards.slice(-20).reduce((a,b) => a+b, 0) / Math.min(20, ML.episodeRewards.length)
+        : 0;
+    const avgS = ML.episodeSurvival.length > 0
+        ? ML.episodeSurvival.slice(-20).reduce((a,b) => a+b, 0) / Math.min(20, ML.episodeSurvival.length)
+        : 0;
+
+    const epEl = document.getElementById('ml-episode');
+    const rewEl = document.getElementById('ml-reward');
+    const avgREl = document.getElementById('ml-avg-reward');
+    const survEl = document.getElementById('ml-survival');
+    const epsEl = document.getElementById('ml-epsilon');
+    const spdEl = document.getElementById('ml-speed');
+    if (epEl) epEl.textContent = `EPISODE: ${ML.episode}`;
+    if (rewEl) rewEl.textContent = `REWARD: ${ML.totalReward.toFixed(0)}`;
+    if (avgREl) avgREl.textContent = `AVG REWARD: ${avgR.toFixed(0)}`;
+    if (survEl) survEl.textContent = `AVG SURVIVAL: ${avgS.toFixed(1)}s`;
+    if (epsEl) epsEl.textContent = `EPSILON: ${ML.epsilon.toFixed(2)}`;
+    if (spdEl) spdEl.textContent = `SPEED: ${ML.speed}x`;
+}
+
+function drawMLGraph() {
+    const gc = ML.graphCtx;
+    if (!gc) return;
+    const gw = 200, gh = 60;
+    gc.clearRect(0, 0, gw, gh);
+    gc.fillStyle = '#f8f8f8';
+    gc.fillRect(0, 0, gw, gh);
+
+    if (ML.graphData.length < 2) return;
+    const max = Math.max(...ML.graphData, 1);
+    const min = Math.min(...ML.graphData, 0);
+    const range = max - min || 1;
+
+    gc.strokeStyle = '#0D47A1';
+    gc.lineWidth = 1.5;
+    gc.beginPath();
+    ML.graphData.forEach((v, i) => {
+        const x = (i / (ML.maxGraphPoints - 1)) * gw;
+        const y = gh - ((v - min) / range) * (gh - 10) - 5;
+        i === 0 ? gc.moveTo(x, y) : gc.lineTo(x, y);
+    });
+    gc.stroke();
+
+    // Labels
+    gc.fillStyle = '#666';
+    gc.font = '9px Courier';
+    gc.fillText(`${max.toFixed(0)}`, 2, 10);
+    gc.fillText(`${min.toFixed(0)}`, 2, gh - 2);
+}
+
+function toggleTraining() {
+    ML.enabled = !ML.enabled;
+    const hud = document.getElementById('ml-hud');
+    if (ML.enabled) {
+        hud.style.display = 'block';
+        if (!ML.brain) {
+            ML.brain = new Chitin611(ML.stateSize, ML.hiddenSize, ML.actionSize);
+            ML.graphCtx = document.getElementById('ml-graph').getContext('2d');
+        }
+        resetEpisode();
+        showMessage("CHITIN-611: ENGAGED. I AM LEARNING.", '#0D47A1', 2.0);
+        score += 50;
+        scoreEl.textContent = `SCORE: ${score}`;
+    } else {
+        hud.style.display = 'none';
+        ML.paused = false;
+        // Restore normal mouse control
+        showMessage("CHITIN-611: DISENGAGED. BACK TO MANUAL.", '#666', 2.0);
+    }
+}
+
+// Keyboard shortcuts — bound to window for reliability
+const KEY_BINDINGS = {
+    't': 'toggleTraining',
+    '+': 'speedUp',
+    '=': 'speedUp',
+    '-': 'slowDown',
+    '_': 'slowDown',
+    'r': 'resetBrain',
+    'R': 'resetBrain',
+    'p': 'pauseToggle',
+    'P': 'pauseToggle',
+    's': 'saveProfile',
+    'S': 'saveProfile',
+    'l': 'loadProfile',
+    'L': 'loadProfile',
+};
+
+window.addEventListener('keydown', e => {
+    const action = KEY_BINDINGS[e.key];
+    if (!action) return;
+    e.preventDefault();
+
+    // Visual key flash
+    flashKey(e.key.toUpperCase());
+
+    switch (action) {
+        case 'toggleTraining':
+            toggleTraining();
+            break;
+        case 'speedUp':
+            ML.speed = Math.min(20, ML.speed + 1);
+            break;
+        case 'slowDown':
+            ML.speed = Math.max(1, ML.speed - 1);
+            break;
+        case 'resetBrain':
+            if (ML.enabled) {
+                // Reload from last saved checkpoint — never wipe
+                const reloaded = loadBrainState();
+                if (reloaded) {
+                    resetEpisode();
+                    showMessage("CHITIN-611 RELOADED FROM CHECKPOINT.", '#00ff41', 2.0);
+                } else {
+                    showMessage("NO CHECKPOINT FOUND.", '#ff0000', 2.0);
+                }
+            }
+            break;
+        case 'pauseToggle':
+            if (ML.enabled) {
+                ML.paused = !ML.paused;
+                showMessage(ML.paused ? "CHITIN-611 PAUSED" : "CHITIN-611 RESUMED", '#666', 1.0);
+            }
+            break;
+        case 'saveProfile':
+            if (ML.enabled && ML.brain) {
+                const data = ML.brain.serialize();
+                const blob = new Blob([data], {type: 'application/json'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'chitin611_profile.json'; a.click();
+                URL.revokeObjectURL(url);
+                showMessage("CHITIN-611 SAVED.", '#00ff41', 1.5);
+            }
+            break;
+        case 'loadProfile':
+            if (ML.enabled) {
+                const input = document.createElement('input');
+                input.type = 'file'; input.accept = '.json';
+                input.onchange = e2 => {
+                    const reader = new FileReader();
+                    reader.onload = e3 => {
+                        try {
+                            const state = JSON.parse(e3.target.result);
+                            if (state.brain) ML.brain.deserialize(state.brain);
+                            if (state.epsilon != null) ML.epsilon = state.epsilon;
+                            if (state.episode != null) ML.episode = state.episode;
+                            if (state.episodeRewards) ML.episodeRewards = state.episodeRewards;
+                            if (state.episodeSurvival) ML.episodeSurvival = state.episodeSurvival;
+                            if (state.graphData) ML.graphData = state.graphData;
+                            ML.graphCtx = document.getElementById('ml-graph')?.getContext('2d');
+                            // Persist to localStorage immediately
+                            saveBrainState();
+                            showMessage("CHITIN-611 IMPORTED & LOCKED.", '#00ff41', 2.0);
+                        } catch(err) {
+                            showMessage("INVALID PROFILE.", '#ff0000', 1.5);
+                        }
+                    };
+                    reader.readAsText(e2.target.files[0]);
+                };
+                input.click();
+            }
+            break;
+    }
+});
+
+// Visual key flash feedback
+let keyFlashTimer = 0;
+let keyFlashText = '';
+function flashKey(key) {
+    keyFlashText = key;
+    keyFlashTimer = 0.8;
+}
+
+let mouseX = 0, mouseY = 0;
+let realMouseX = 0, realMouseY = 0; // raw OS cursor position
+let messageTimer = 0;
+let messageText = '';
+let messageColor = '#00ff41';
+let idleTimer = 0;
+let panicTimer = 0;
+
+// ── Minions ──
+const minions = [];
+
+function createMinion(x, y, parentColor) {
+    const hueShift = Math.random() * 60 - 30;
+    const baseH = parentColor;
+    return {
+        x, y,
+        vx: (Math.random() - 0.5) * 3,
+        vy: (Math.random() - 0.5) * 3,
+        size: 10 + Math.random() * 5,
+        color: '#ff2222',
+        alive: true,
+        life: 1.0,       // fade in
+        wobble: Math.random() * Math.PI * 2,
+        age: 0,
+    };
+}
+
+function shiftColor(hex, shift) {
+    // Simple RGB shift
+    let r = parseInt(hex.slice(1,3), 16);
+    let g = parseInt(hex.slice(3,5), 16);
+    let b = parseInt(hex.slice(5,7), 16);
+    r = Math.max(0, Math.min(255, r + shift));
+    g = Math.max(0, Math.min(255, g + shift));
+    b = Math.max(0, Math.min(255, b + shift));
+    return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`;
+}
+
+// ── Resize ──
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── Mouse ──
+let mouseDown = false;
+let killCooldown = 0;
+const KILL_RATE = 0.15; // seconds between kills when holding
+
+document.addEventListener('mousemove', e => {
+    realMouseX = e.clientX;
+    realMouseY = e.clientY;
+    mouseX = realMouseX;
+    mouseY = realMouseY;
+});
+document.addEventListener('mousedown', e => {
+    mouseDown = true;
+    mouseX = e.clientX;
+    mouseY = e.clientY;
+
+    // ── Game Over restart ──
+    if (gameOver) {
+        restartGame();
+        return;
+    }
+
+    if (ML.enabled) return;
+    const w = canvas.width, h = canvas.height;
+    const sandEnd = h * 0.65;
+
+    // Check sandcastle click
+    const castleX = w * 0.08, castleY = sandEnd - 30, castleS = 0.6;
+    if (e.clientX > castleX - 40 * castleS && e.clientX < castleX + 40 * castleS &&
+        e.clientY > castleY - 80 * castleS && e.clientY < castleY + 10) {
+        const now = Date.now();
+        sandcastle.clicks.push(now);
+        sandcastle.clicks = sandcastle.clicks.filter(t => now - t < sandcastle.window);
+        if (sandcastle.clicks.length >= sandcastle.threshold) {
+            sandcastle.clicks = [];
+            summonCrabGod();
+        }
+        return;
+    }
+
+    // Check squid click → anger (ANGER IS FOREVER)
+    if (squid.alive) {
+        const sdx = e.clientX - squid.x;
+        const sdy = e.clientY - squid.y;
+        if (Math.sqrt(sdx * sdx + sdy * sdy) < squid.size) {
+            const prevAnger = squid.anger;
+            squid.anger = Math.min(10, squid.anger + 1);
+            squid.cursorPushStrength = Math.min(0.8, squid.cursorPushStrength + 0.05);
+            squid.vy -= 2;
+            // Score scales with anger — more angry = more points
+            const angerBonus = 10 + squid.anger * 5;
+            score += angerBonus;
+            scoreEl.textContent = `SCORE: ${score}`;
+            if (squid.anger >= 10 && prevAnger < 10) {
+                showMessage("MAXIMUM FURY REACHED.", '#ff0000', 2.0);
+            } else if (squid.anger > 5) {
+                showMessage("STOP POKING ME.", '#ff4400', 1.5);
+            } else {
+                showMessage("the squid does not appreciate that.", '#ff4400', 1.5);
+            }
+            return;
+        }
+    }
+
+    // Immediate kill on first click
+    tryKillAt(e.clientX, e.clientY);
+});
+document.addEventListener('mouseup', () => { mouseDown = false; killCooldown = 0; });
+
+function tryKillAt(x, y) {
+    if (gameOver || ML.enabled) return false;
+
+    // Check crab2
+    if (crab2.alive) {
+        const dx2 = x - crab2.x, dy2 = y - crab2.y;
+        if (Math.sqrt(dx2*dx2 + dy2*dy2) < Math.max(12, crab2.size * 0.75)) {
+            crab2Die();
+            return true;
+        }
+    }
+    // Check god crabs
+    for (let i = godCrabs.length - 1; i >= 0; i--) {
+        const g = godCrabs[i];
+        if (!g.alive) continue;
+        const gdx = x - g.x, gdy = y - g.y;
+        if (Math.sqrt(gdx * gdx + gdy * gdy) < Math.max(12, g.size * 0.75)) {
+            g.alive = false;
+            g.deathCount = (g.deathCount || 0) + 1;
+            score = Math.max(0, score - 100);
+            scoreEl.textContent = `SCORE: ${score}`;
+            showMessage("−100. GOD FALLEN.", '#ff0000', 1.5);
+            return true;
+        }
+    }
+    // Check minions
+    for (let i = minions.length - 1; i >= 0; i--) {
+        const m = minions[i];
+        if (!m.alive) continue;
+        const dx = x - m.x, dy = y - m.y;
+        if (Math.sqrt(dx*dx + dy*dy) < m.size + 10) {
+            minionDie(i);
+            return true;
+        }
+    }
+    // Check main crab
+    if (crab.alive) {
+        const dx = x - crab.x, dy = y - crab.y;
+        if (Math.sqrt(dx*dx + dy*dy) < Math.max(12, crab.size * 0.75)) {
+            crabDie();
+            return true;
+        }
+    }
+    return false;
+}
+
+// ── HSL helper ──
+function hslToHex(h, s, l) {
+    h /= 360; s /= 100; l /= 100;
+    const a = s * Math.min(l, 1 - l);
+    const f = n => {
+        const k = (n + h * 12) % 12;
+        const color = l - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+        return Math.round(255 * color).toString(16).padStart(2, '0');
+    };
+    return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+// ── Message ──
+function showMessage(text, color, duration) {
+    messageText = text;
+    messageColor = color;
+    messageTimer = duration;
+    msgEl.textContent = text;
+    msgEl.style.color = color;
+    msgEl.style.textShadow = `0 0 8px ${color}60`;
+    msgEl.classList.add('visible');
+}
+
+// ── Spawn Minion ──
+function spawnMinion() {
+    if (minions.filter(m => m.alive).length >= crab.maxMinions) return;
+
+    // Open trapdoor
+    crab.trapdoorTarget = 1;
+    crab.trapdoorTimer = 0.4; // delay before minion appears
+
+    // Show spawn insult
+    showMessage(
+        SPAWN_INSULTS[Math.floor(Math.random() * SPAWN_INSULTS.length)],
+        '#ffaa00', 1.5
+    );
+}
+
+function spawnMinionActual() {
+    const angle = Math.random() * Math.PI * 2;
+    const offset = crab.size * 0.3;
+    const mx = crab.x + Math.cos(angle) * offset;
+    const my = crab.y - crab.size * 0.4 + Math.sin(angle) * offset * 0.3;
+    const minion = createMinion(mx, my, crab.color);
+    minions.push(minion);
+    minionEl.textContent = `MINIONS: ${minions.filter(m => m.alive).length}`;
+
+    // Spawn burst particles
+    for (let i = 0; i < 6; i++) {
+        const a = (i / 6) * Math.PI * 2;
+        crab.particles.push({
+            x: mx, y: my,
+            vx: Math.cos(a) * 2,
+            vy: Math.sin(a) * 2 - 1,
+            life: 0.6,
+            color: crab.color,
+            size: 2,
+        });
+    }
+
+    // Close trapdoor after a beat
+    setTimeout(() => { crab.trapdoorTarget = 0; }, 300);
+}
+
+// ── Minion Death ──
+function minionDie(index) {
+    const m = minions[index];
+    if (!m.alive) return;
+    m.alive = false;
+
+    // Small explosion
+    for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        crab.particles.push({
+            x: m.x, y: m.y,
+            vx: Math.cos(a) * (1 + Math.random() * 2),
+            vy: Math.sin(a) * (1 + Math.random() * 2),
+            life: 0.8,
+            color: ['#ff4444', '#ffaa00', '#ff8800'][Math.floor(Math.random() * 3)],
+            size: 2 + Math.random() * 2,
+        });
+    }
+
+    showMessage(
+        MINION_DEATH_INSULTS[Math.floor(Math.random() * MINION_DEATH_INSULTS.length)],
+        '#ff6688', 2.0
+    );
+
+    // Clean up dead minions periodically
+    setTimeout(() => {
+        for (let i = minions.length - 1; i >= 0; i--) {
+            if (!minions[i].alive && minions[i].life <= 0) minions.splice(i, 1);
+        }
+        minionEl.textContent = `MINIONS: ${minions.filter(m => m.alive).length}`;
+    }, 500);
+}
+
+// ── Death ──
+function crabDie() {
+    if (!crab.alive || Date.now() < crab.invincibleUntil) {
+        if (Date.now() < crab.invincibleUntil) {
+            showMessage("NICE TRY. I'M INVINCIBLE RIGHT NOW.", '#00ffff', 1.5);
+        }
+        return;
+    }
+    crab.alive = false;
+    crab.deathCount++;
+    crab.deathFrame = 0;
+    crab.panicLevel = 0;
+    crab.trapdoorOpen = 0;
+    crab.trapdoorTarget = 0;
+
+    // Score penalty — 100 points to kill a god
+    score = Math.max(0, score - 100);
+    scoreEl.textContent = `SCORE: ${score}`;
+    showMessage("−100 POINTS. YOU MONSTER.", '#ff0000', 1.5);
+
+    // Explosion particles
+    for (let i = 0; i < 20; i++) {
+        const angle = (i / 20) * Math.PI * 2;
+        const speed = 2 + Math.random() * 4;
+        crab.particles.push({
+            x: crab.x, y: crab.y,
+            vx: Math.cos(angle) * speed,
+            vy: Math.sin(angle) * speed,
+            life: 1.0,
+            color: ['#ff0000', '#ff4400', '#ff8800', '#ffcc00', '#fff'][Math.floor(Math.random() * 5)],
+            size: 3 + Math.random() * 5,
+        });
+    }
+
+    // Orphan minions scatter but survive!
+    minions.forEach(m => {
+        if (m.alive) {
+            m.vx += (Math.random() - 0.5) * 4;
+            m.vy -= Math.random() * 2;
+        }
+    });
+
+    showMessage(
+        DEATH_INSULTS[Math.floor(Math.random() * DEATH_INSULTS.length)],
+        '#ff0000', 3.0
+    );
+    deathEl.textContent = `DEATHS: ${crab.deathCount}`;
+
+    setTimeout(crabRespawn, 2500);
+}
+
+// ── Respawn ──
+function crabRespawn() {
+    crab.alive = true;
+    crab.deathFrame = 0;
+
+    const w = canvas.width, h = canvas.height;
+    const edge = Math.floor(Math.random() * 4);
+    if (edge === 0) { crab.x = Math.random() * (w - 100) + 50; crab.y = 50; }
+    else if (edge === 1) { crab.x = w - 50; crab.y = Math.random() * (h - 100) + 50; }
+    else if (edge === 2) { crab.x = Math.random() * (w - 100) + 50; crab.y = h - 50; }
+    else { crab.x = 50; crab.y = Math.random() * (h - 100) + 50; }
+
+    crab.vx = 0; crab.vy = 0;
+    crab.size = crab.baseSize + crab.deathCount * 3;
+    crab.color = hslToHex((crab.deathCount * 30) % 360, 80, 50);
+    crab.invincibleUntil = Date.now() + 2000;
+    crab.spawnCooldown = 0;
+
+    // More minions at higher death counts
+    crab.maxMinions = 8 + crab.deathCount * 2;
+
+    const laugh = RESPAWN_LAUGHTER[Math.floor(Math.random() * RESPAWN_LAUGHTER.length)];
+    const upgrade = UPGRADE_INSULTS[Math.floor(Math.random() * UPGRADE_INSULTS.length)];
+    showMessage(`${laugh} ${upgrade}`, crab.color, 4.0);
+    sizeEl.textContent = `SIZE: ${crab.size}`;
+}
+
+// ── Summon Second Crab God (sandcastle easter egg) ──
+const SUMMON_INSULTS = [
+    "YOU DARE DISTURB THE SANCTUARY?!",
+    "TWO GODS NOW WALK THIS BEACH.",
+    "THE CASTLE HAS AWAKENED ITS LORD.",
+    "YOU THOUGHT ONE WAS ENOUGH?!",
+    "DOUBLE THE CRABS. DOUBLE THE PAIN.",
+    "I HAVE A TWIN AND HE'S HUNGRIER THAN ME.",
+    "BEHOLD. THE TWIN GOD.",
+    "YOU SUMMONED THIS upon YOURSELF.",
+];
+
+function summonCrabGod() {
+    const w = canvas.width, h = canvas.height;
+
+    // Always create a NEW god crab in the godCrabs array
+    const newGod = {
+        x: w * 0.08 + (Math.random() - 0.5) * 60,
+        y: h * 0.65 - 60 + (Math.random() - 0.5) * 40,
+        vx: (Math.random() - 0.5) * 4,
+        vy: -3,
+        size: 22 + Math.random() * 8,
+        color: '#ff6600',
+        alive: true,
+        panicLevel: 0,
+        deathCount: 0,
+        invincibleUntil: Date.now() + 3000,
+        hasCrown: true,
+        spawnCooldown: 0,
+        replicateTimer: 0,
+        panicInsultCooldown: 0,
+        idleInsultCooldown: 0,
+    };
+    godCrabs.push(newGod);
+
+    // Explosion at sandcastle
+    for (let i = 0; i < 15; i++) {
+        const a = (i / 15) * Math.PI * 2;
+        crab.particles.push({
+            x: newGod.x, y: newGod.y,
+            vx: Math.cos(a) * (2 + Math.random() * 3),
+            vy: Math.sin(a) * (2 + Math.random() * 3),
+            life: 1.0,
+            color: ['#FFD700', '#FFA500', '#FF6347', '#fff'][Math.floor(Math.random() * 4)],
+            size: 3 + Math.random() * 4,
+        });
+    }
+
+    score += 10;
+    scoreEl.textContent = `SCORE: ${score}`;
+    godEl.textContent = `GODS: ${(crab2.alive ? 1 : 0) + godCrabs.length}`;
+    sandcastle.summoned = true;
+
+    showMessage(
+        SUMMON_INSULTS[Math.floor(Math.random() * SUMMON_INSULTS.length)],
+        '#FF6600', 3.5
+    );
+}
+
+function crab2Die() {
+    if (!crab2.alive || Date.now() < crab2.invincibleUntil) return;
+    crab2.alive = false;
+    crab2.deathCount++;
+    crab2.deathFrame = 0;
+
+    // Score penalty — 100 points to kill a god
+    score = Math.max(0, score - 100);
+    scoreEl.textContent = `SCORE: ${score}`;
+
+    for (let i = 0; i < 15; i++) {
+        const a = (i / 15) * Math.PI * 2;
+        crab2.particles.push({
+            x: crab2.x, y: crab2.y,
+            vx: Math.cos(a) * (2 + Math.random() * 3),
+            vy: Math.sin(a) * (2 + Math.random() * 3),
+            life: 1.0,
+            color: ['#ff0000', '#ff4400', '#ff8800', '#fff'][Math.floor(Math.random() * 4)],
+            size: 3 + Math.random() * 4,
+        });
+    }
+
+    showMessage(
+        DEATH_INSULTS[Math.floor(Math.random() * DEATH_INSULTS.length)],
+        '#ff6600', 2.5
+    );
+
+    // Kill all its minions
+    // (they share the same minions array, so we just let them be)
+
+    setTimeout(crab2Respawn, 3000);
+}
+
+function crab2Respawn() {
+    const w = canvas.width, h = canvas.height;
+    crab2.alive = true;
+    crab2.x = Math.random() * w;
+    crab2.y = Math.random() < 0.5 ? 30 : h - 30;
+    crab2.vx = (Math.random() - 0.5) * 4;
+    crab2.vy = 0;
+    crab2.size = crab2.baseSize + crab2.deathCount * 2;
+    crab2.color = hslToHex(20 + crab2.deathCount * 15, 90, 50);
+    crab2.invincibleUntil = Date.now() + 2000;
+    crab2.spawnCooldown = 0;
+
+    showMessage("THE TWIN RETURNS. HARDER.", '#ff6600', 2.0);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PASSIVE SCORING — Crabs harass cursor for points
+// ═══════════════════════════════════════════════════════════════
+
+function passiveHarass(crabObj, dt) {
+    if (!crabObj.alive || gameOver) return;
+    const dx = mouseX - crabObj.x;
+    const dy = mouseY - crabObj.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    // Occasionally drift toward cursor (harassment)
+    if (dist > 80 && Math.random() < 0.02) {
+        crabObj.vx += (dx / dist) * 0.8;
+        crabObj.vy += (dy / dist) * 0.8;
+    }
+
+    // Score points for getting close
+    if (dist < 100) {
+        const points = Math.floor((100 - dist) * 0.1);
+        score += points;
+        scoreEl.textContent = `SCORE: ${score}`;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MINION FUSION — Idle at max → new god crab
+// ═══════════════════════════════════════════════════════════════
+
+function checkMinionFusion(dt) {
+    const aliveMinions = minions.filter(m => m.alive);
+    const maxMinions = crab.maxMinions;
+
+    if (aliveMinions.length >= maxMinions && crab.alive) {
+        minionFusionTimer += dt;
+        if (minionFusionTimer >= MINION_FUSION_TIME) {
+            minionFusionTimer = 0;
+            fuseMinionsIntoGod(aliveMinions);
+        }
+    } else {
+        minionFusionTimer = Math.max(0, minionFusionTimer - dt * 2);
+    }
+}
+
+function fuseMinionsIntoGod(aliveMinions) {
+    // Consume 5 minions to create a god crab
+    const consumed = aliveMinions.splice(0, Math.min(5, aliveMinions.length));
+    consumed.forEach(m => { m.alive = false; m.life = 0; });
+
+    const w = canvas.width, h = canvas.height;
+    const newGod = {
+        x: consumed[0]?.x || w / 2,
+        y: consumed[0]?.y || h / 2,
+        vx: (Math.random() - 0.5) * 5,
+        vy: -3,
+        size: 22,
+        color: hslToHex(Math.random() * 360, 80, 50),
+        alive: true,
+        panicLevel: 0,
+        deathCount: 0,
+        invincibleUntil: Date.now() + 3000,
+        hasCrown: false,
+        spawnCooldown: 0,
+        replicateTimer: 0,
+        panicInsultCooldown: 0,
+        idleInsultCooldown: 0,
+    };
+
+    godCrabs.push(newGod);
+    score += 50;
+    scoreEl.textContent = `SCORE: ${score}`;
+    godEl.textContent = `GODS: ${(crab2.alive ? 1 : 0) + godCrabs.length}`;
+
+    showMessage("MINIONS FUSED INTO A NEW GOD.", '#ff00ff', 2.5);
+
+    // Check if we can now fuse into squid
+    checkSquidFusion();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SQUID FUSION — 3 god crabs → SQUID
+// ═══════════════════════════════════════════════════════════════
+
+function checkSquidFusion() {
+    if (squid.alive) return;
+    const totalGods = (crab2.alive ? 1 : 0) + godCrabs.length;
+    if (totalGods >= 8 && !squid.alive) {
+        fuseIntoSquid();
+    }
+}
+
+function fuseIntoSquid() {
+    // Collect all god positions
+    const positions = [
+        { x: crab.x, y: crab.y },
+        { x: crab2.x, y: crab2.y },
+        ...godCrabs.map(g => ({ x: g.x, y: g.y })),
+    ];
+
+    // Average position
+    const cx = positions.reduce((s, p) => s + p.x, 0) / positions.length;
+    const cy = positions.reduce((s, p) => s + p.y, 0) / positions.length;
+
+    // Explosion at fusion point
+    for (let i = 0; i < 30; i++) {
+        const a = (i / 30) * Math.PI * 2;
+        crab.particles.push({
+            x: cx, y: cy,
+            vx: Math.cos(a) * (3 + Math.random() * 5),
+            vy: Math.sin(a) * (3 + Math.random() * 5),
+            life: 1.5,
+            color: ['#ff00ff', '#ff0088', '#8800ff', '#fff'][Math.floor(Math.random() * 4)],
+            size: 4 + Math.random() * 6,
+        });
+    }
+
+    // Kill all consumed gods — but crab respawns, the loop never ends
+    crab2.alive = false;
+    godCrabs.length = 0;
+    // Minions survive the fusion!
+
+    // Spawn squid
+    squid.alive = true;
+    squid.x = cx;
+    squid.y = canvas.height * 0.88;
+    squid.vx = 0;
+    squid.vy = 0;
+    squid.size = 40;
+    squid.anger = 10; // AWAKENED = MAXIMUM FURY
+    squid.eatCooldown = 0;
+    squid.cursorPushStrength = 0.15;
+    squid.graceTimer = 10.0;
+
+    score += 200;
+    scoreEl.textContent = `SCORE: ${score}`;
+    godEl.textContent = `GODS: 0`;
+    squidStatusEl.textContent = 'SQUID: AWAKENED';
+    squidStatusEl.style.color = '#ff00ff';
+
+    showMessage("THREE GODS BECONE ONE. THE SQUID RISES.", '#ff00ff', 4.0);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SQUID MECHANICS — Eats minions, pushes cursor, unkillable
+// ═══════════════════════════════════════════════════════════════
+
+function squidStep(dt) {
+    if (!squid.alive || gameOver) return;
+    const w = canvas.width, h = canvas.height;
+    const now = Date.now();
+
+    // ── STATIONARY — anchored at bottom center ──
+    // Gentle drift left/right along the floor
+    squid.vx *= 0.95;
+    squid.x += squid.vx;
+    // Slow patrol
+    if (Math.random() < 0.01) squid.vx += (Math.random() - 0.5) * 0.8;
+    // Stay in bounds
+    if (squid.x < squid.size) { squid.x = squid.size; squid.vx = Math.abs(squid.vx) * 0.5; }
+    if (squid.x > w - squid.size) { squid.x = w - squid.size; squid.vx = -Math.abs(squid.vx) * 0.5; }
+    // Anchor to bottom
+    squid.y = h * 0.88;
+
+    // ── TENTACLE REACH ZONE ──
+    const tentacleReach = squid.size * 4.0; // how far arms can grab
+    const killbox = squid.size * 1.5; // eat zone — BIGGER, actually grabs
+
+    // ── CURSOR INTERACTION (push/pull) — from REAL cursor position ──
+    const dx = realMouseX - squid.x;
+    const dy = realMouseY - squid.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const isAngry = squid.anger > 0.5;
+
+    if (isAngry && dist < 250 && dist > 0) {
+        // ANGRY: DRAG cursor toward killbox — STRONG pull
+        const pullForce = squid.cursorPushStrength * (1 - dist / 250);
+        mouseX -= (dx / dist) * pullForce * 120;
+        mouseY -= (dy / dist) * pullForce * 120;
+        mouseX = Math.max(0, Math.min(w, mouseX));
+        mouseY = Math.max(0, Math.min(h, mouseY));
+    } else if (!isAngry && dist < 200 && dist > 0) {
+        // CALM: weak repulsion
+        const pushForce = squid.cursorPushStrength * (1 - dist / 200);
+        mouseX += (dx / dist) * pushForce * 40;
+        mouseY += (dy / dist) * pushForce * 40;
+        mouseX = Math.max(0, Math.min(w, mouseX));
+        mouseY = Math.max(0, Math.min(h, mouseY));
+    }
+
+    // ── TENTACLE PULL — arms grab nearby minions and drag them in ──
+    squid.eatCooldown = Math.max(0, squid.eatCooldown - dt);
+    squid.nearestMinion = null; // for tentacle drawing
+    let nearestMinionDist = Infinity;
+    for (let i = minions.length - 1; i >= 0; i--) {
+        const m = minions[i];
+        if (!m.alive) continue;
+        const mdx = m.x - squid.x;
+        const mdy = m.y - squid.y;
+        const mDist = Math.sqrt(mdx * mdx + mdy * mdy);
+
+        // In killbox = EAT
+        if (mDist < killbox) {
+            m.alive = false;
+            m.life = 0;
+            squid.size = Math.min(65, squid.size + 1);
+            squid.cursorPushStrength = Math.min(0.5, squid.cursorPushStrength + 0.01);
+            score += 25;
+            scoreEl.textContent = `SCORE: ${score}`;
+            continue;
+        }
+
+        // In tentacle reach = REACH & DRAG toward killbox
+        if (mDist < tentacleReach && mDist > killbox) {
+            const pullStr = 1.5 * (1 - mDist / tentacleReach); // STRONG pull, stronger when closer
+            m.vx -= (mdx / mDist) * pullStr;
+            m.vy -= (mdy / mDist) * pullStr * 0.8;
+            // Drag effect — slow them down so they can't escape
+            m.vx *= 0.92;
+            m.vy *= 0.92;
+            // Track nearest for tentacle drawing
+            if (mDist < nearestMinionDist) {
+                nearestMinionDist = mDist;
+                squid.nearestMinion = m;
+            }
+            // Score for grabbing
+            score += 2;
+            scoreEl.textContent = `SCORE: ${score}`;
+        }
+    }
+
+    // ── CURSOR TOUCHES SQUID → GAME OVER ──
+    squid.graceTimer = Math.max(0, squid.graceTimer - dt);
+    if (dist < squid.size * 1.2 && squid.eatCooldown <= 0 && squid.graceTimer <= 0) {
+        triggerGameOver();
+    }
+}
+
+function triggerGameOver() {
+    gameOver = true;
+    gameOverMsg = GAME_OVER_MESSAGES[Math.floor(Math.random() * GAME_OVER_MESSAGES.length)];
+    gameOverSubmsg = `Final score: ${score}`;
+    showMessage("💀", '#ff0000', 1);
+
+    // ── Auto-save chitin-611 profile to localStorage ──
+    saveBrainState();
+}
+
+function drawSquid() {
+    if (!squid.alive) return;
+    const x = squid.x, y = squid.y, s = squid.size;
+    const now = Date.now();
+    const angry = squid.anger > 0;
+    const pulse = Math.sin(now * 0.004) * 0.15 + 0.85;
+
+    // ── DARK AURA (menacing glow) ──
+    const auraGrad = ctx.createRadialGradient(x, y, s * 0.3, x, y, s * 1.8);
+    auraGrad.addColorStop(0, angry ? 'rgba(255, 0, 50, 0.15)' : 'rgba(100, 0, 150, 0.12)');
+    auraGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    ctx.fillStyle = auraGrad;
+    ctx.beginPath();
+    ctx.arc(x, y, s * 1.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── TENTACLE REACH ZONE (danger circle) ──
+    const tentacleReach = s * 4.0;
+    ctx.strokeStyle = `rgba(255, 0, 80, ${0.08 + Math.sin(now * 0.003) * 0.04})`;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 8]);
+    ctx.beginPath();
+    ctx.arc(x, y, tentacleReach, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Killbox zone — BIG and menacing
+    ctx.fillStyle = `rgba(255, 0, 50, ${0.08 + Math.sin(now * 0.005) * 0.04})`;
+    ctx.beginPath();
+    ctx.arc(x, y, s * 1.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255, 0, 50, ${0.15 + Math.sin(now * 0.003) * 0.05})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(x, y, s * 1.5, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // ── TENTACLES (8 long, writhing — stretch toward nearest minion) ──
+    ctx.lineCap = 'round';
+    const nearest = squid.nearestMinion;
+    for (let i = 0; i < 8; i++) {
+        // Spread across bottom half: from left to right
+        const baseAngle = (i / 7) * Math.PI + Math.PI * 0.05;
+        const tx = x + Math.cos(baseAngle) * s * 0.35;
+        const ty = y + s * 0.1;
+
+        // Stretch toward nearest minion if one is in range
+        let reachBiasX = 0, reachBiasY = 0;
+        if (nearest && nearestMinionDist < tentacleReach) {
+            const ndx = nearest.x - tx;
+            const ndy = nearest.y - ty;
+            const nDist = Math.sqrt(ndx * ndx + ndy * ndy);
+            const reachStrength = 1.0 - nearestMinionDist / tentacleReach;
+            // Tentacles 2-5 are the "grabbing" arms
+            if (i >= 2 && i <= 5) {
+                reachBiasX = (ndx / nDist) * reachStrength * s * 0.8;
+                reachBiasY = (ndy / nDist) * reachStrength * s * 0.6;
+            }
+        }
+
+        // Longer segments for bigger reach
+        const segLen = s * 0.5;
+        const wave1 = Math.sin(now * 0.003 + i * 1.3) * s * 0.4;
+        const wave2 = Math.sin(now * 0.005 + i * 2.0 + 1) * s * 0.25;
+        const wave3 = Math.sin(now * 0.002 + i * 0.9 + 2) * s * 0.2;
+
+        const mid1x = tx + Math.cos(baseAngle) * segLen + wave1;
+        const mid1y = ty + segLen * 0.3;
+        const mid2x = mid1x + Math.cos(baseAngle + 0.2) * segLen + wave2;
+        const mid2y = mid1y + segLen * 0.4;
+        const endx = mid2x + Math.cos(baseAngle + 0.4) * segLen * 0.8 + wave3 + reachBiasX;
+        const endy = mid2y + segLen * 0.3 + reachBiasY;
+
+        const tentGrad = ctx.createLinearGradient(tx, ty, endx, endy);
+        if (angry) {
+            tentGrad.addColorStop(0, '#880022');
+            tentGrad.addColorStop(0.5, '#cc0033');
+            tentGrad.addColorStop(1, '#ff2244');
+        } else {
+            tentGrad.addColorStop(0, '#440066');
+            tentGrad.addColorStop(0.5, '#660088');
+            tentGrad.addColorStop(1, '#8800aa');
+        }
+
+        ctx.strokeStyle = tentGrad;
+        ctx.lineWidth = s * 0.07;
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.quadraticCurveTo(mid1x, mid1y, mid2x, mid2y);
+        ctx.quadraticCurveTo(mid2x, mid2y, endx, endy);
+        ctx.stroke();
+
+        // Suckers along tentacle
+        ctx.fillStyle = 'rgba(200, 150, 255, 0.4)';
+        for (let j = 1; j <= 4; j++) {
+            const t = j / 5;
+            const sx = tx + (mid2x - tx) * t + wave1 * t * 0.5;
+            const sy = ty + (mid2y - ty) * t;
+            ctx.beginPath();
+            ctx.arc(sx, sy, s * 0.02, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Tip glow
+        ctx.fillStyle = `rgba(180, 120, 255, ${0.3 + Math.sin(now * 0.004 + i) * 0.15})`;
+        ctx.beginPath();
+        ctx.arc(endx, endy, s * 0.03, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // ── MANTLE (pointed, organic body) ──
+    ctx.beginPath();
+    ctx.moveTo(x, y - s * 0.9);
+    ctx.bezierCurveTo(x - s * 0.3, y - s * 0.85, x - s * 0.55, y - s * 0.5, x - s * 0.5, y - s * 0.1);
+    ctx.bezierCurveTo(x - s * 0.45, y + s * 0.15, x - s * 0.3, y + s * 0.2, x, y + s * 0.25);
+    ctx.bezierCurveTo(x + s * 0.3, y + s * 0.2, x + s * 0.45, y + s * 0.15, x + s * 0.5, y - s * 0.1);
+    ctx.bezierCurveTo(x + s * 0.55, y - s * 0.5, x + s * 0.3, y - s * 0.85, x, y - s * 0.9);
+    ctx.closePath();
+
+    const bodyGrad = ctx.createRadialGradient(x, y - s * 0.3, 0, x, y - s * 0.3, s * 0.6);
+    if (angry) {
+        bodyGrad.addColorStop(0, '#cc0033');
+        bodyGrad.addColorStop(0.6, '#880022');
+        bodyGrad.addColorStop(1, '#440011');
+    } else {
+        bodyGrad.addColorStop(0, '#7700aa');
+        bodyGrad.addColorStop(0.6, '#550077');
+        bodyGrad.addColorStop(1, '#330044');
+    }
+    ctx.fillStyle = bodyGrad;
+    ctx.fill();
+    ctx.strokeStyle = angry ? '#ff0044' : '#9900cc';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // ── HEAD DOME ──
+    ctx.beginPath();
+    ctx.ellipse(x, y - s * 0.5, s * 0.38, s * 0.28, 0, Math.PI, 0);
+    const headGrad = ctx.createRadialGradient(x, y - s * 0.55, 0, x, y - s * 0.5, s * 0.35);
+    headGrad.addColorStop(0, angry ? '#ff3355' : '#9900cc');
+    headGrad.addColorStop(1, angry ? '#aa0022' : '#660088');
+    ctx.fillStyle = headGrad;
+    ctx.fill();
+    ctx.strokeStyle = angry ? '#ff0044' : '#aa00dd';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // ── BIOLUMINESCENT SPOTS ──
+    const glowspots = [
+        { ox: -0.2, oy: -0.4, r: 0.04 },
+        { ox: 0.15, oy: -0.35, r: 0.035 },
+        { ox: -0.1, oy: -0.6, r: 0.03 },
+        { ox: 0.25, oy: -0.55, r: 0.025 },
+        { ox: -0.3, oy: -0.25, r: 0.03 },
+        { ox: 0.3, oy: -0.2, r: 0.025 },
+    ];
+    for (const spot of glowspots) {
+        const sx = x + spot.ox * s;
+        const sy = y + spot.oy * s;
+        const sr = spot.r * s;
+        const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, sr * 2);
+        glow.addColorStop(0, `rgba(150, 100, 255, ${0.6 * pulse})`);
+        glow.addColorStop(1, 'rgba(150, 100, 255, 0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(sx, sy, sr * 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = `rgba(200, 180, 255, ${0.8 * pulse})`;
+        ctx.beginPath();
+        ctx.arc(sx, sy, sr * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // ── EYES (6 eyes, 3 pairs — evil slit pupils) ──
+    const eyePairs = [
+        { ox: -0.18, oy: -0.52, r: 0.07 },
+        { ox: 0.18, oy: -0.52, r: 0.07 },
+        { ox: -0.12, oy: -0.58, r: 0.05 },
+        { ox: 0.12, oy: -0.58, r: 0.05 },
+        { ox: -0.06, oy: -0.63, r: 0.035 },
+        { ox: 0.06, oy: -0.63, r: 0.035 },
+    ];
+
+    for (const eye of eyePairs) {
+        const ex = x + eye.ox * s;
+        const ey = y + eye.oy * s;
+        const er = eye.r * s;
+
+        // Socket
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+        ctx.beginPath();
+        ctx.arc(ex, ey, er * 1.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Glowing eye
+        const eyeGrad = ctx.createRadialGradient(ex, ey, 0, ex, ey, er);
+        eyeGrad.addColorStop(0, '#eeff00');
+        eyeGrad.addColorStop(0.7, '#ccdd00');
+        eyeGrad.addColorStop(1, '#889900');
+        ctx.fillStyle = eyeGrad;
+        ctx.beginPath();
+        ctx.arc(ex, ey, er, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Slit pupil
+        const slitH = er * 0.85;
+        const slitW = er * 0.2;
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.ellipse(ex, ey, slitW, slitH, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Pupil tracks mouse
+        const pdx = mouseX - ex;
+        const pdy = mouseY - ey;
+        const pdist = Math.max(Math.sqrt(pdx * pdx + pdy * pdy), 1);
+        const ppx = (pdx / pdist) * er * 0.15;
+        const ppy = (pdy / pdist) * er * 0.15;
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.ellipse(ex + ppx, ey + ppy, slitW * 0.8, slitH * 0.8, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Highlight
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.beginPath();
+        ctx.arc(ex - er * 0.25, ey - er * 0.3, er * 0.2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // ── BEAK ──
+    const beakY = y + s * 0.2;
+    ctx.fillStyle = '#1a0a00';
+    ctx.beginPath();
+    ctx.moveTo(x, beakY);
+    ctx.lineTo(x - s * 0.06, beakY + s * 0.12);
+    ctx.lineTo(x, beakY + s * 0.08);
+    ctx.lineTo(x + s * 0.06, beakY + s * 0.12);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // ── ANGER ──
+    if (squid.anger > 2) {
+        ctx.fillStyle = '#ff0000';
+        ctx.font = `bold ${Math.floor(s * 0.3)}px serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('💢', x + (Math.random() - 0.5) * squid.anger * 0.5, y - s * 0.95);
+    }
+
+    // ── GRACE TIMER ──
+    if (squid.graceTimer > 0) {
+        ctx.fillStyle = `rgba(0, 255, 136, ${0.3 + Math.sin(now * 0.01) * 0.2})`;
+        ctx.font = `bold ${Math.max(10, Math.floor(s * 0.2))}px Courier`;
+        ctx.textAlign = 'center';
+        ctx.fillText(`${Math.ceil(squid.graceTimer)}`, x, y + s * 0.55);
+    }
+}
+
+// ── Game Over Screen ──
+function drawGameOver() {
+    const w = canvas.width, h = canvas.height;
+    const now = Date.now();
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.fillRect(0, 0, w, h);
+
+    // Skull / death icon
+    ctx.font = '120px serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('💀', w / 2, h * 0.3);
+
+    // Main message
+    ctx.fillStyle = '#ff0000';
+    ctx.font = 'bold 56px Courier New';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 4;
+    ctx.strokeText(gameOverMsg, w / 2, h * 0.5);
+    ctx.fillText(gameOverMsg, w / 2, h * 0.5);
+
+    // Sub message
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '24px Courier New';
+    ctx.fillText(gameOverSubmsg, w / 2, h * 0.58);
+
+    // Blinking restart prompt
+    if (Math.floor(now / 500) % 2 === 0) {
+        ctx.fillStyle = '#ffcc00';
+        ctx.font = 'bold 28px Courier New';
+        ctx.fillText('CLICK TO RESTART', w / 2, h * 0.7);
+    }
+
+    // Bottom flavor
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.font = '16px Courier New';
+    ctx.fillText('the squid remembers', w / 2, h * 0.88);
+}
+
+// ── Restart Game ──
+function restartGame() {
+    // Reset main crab
+    crab.alive = true;
+    crab.x = canvas.width / 2;
+    crab.y = canvas.height / 2;
+    crab.vx = 0; crab.vy = 0;
+    crab.size = 40;
+    crab.color = '#FFD700';
+    crab.deathCount = 0;
+    crab.panicLevel = 0;
+    crab.invincibleUntil = Date.now() + 2000;
+    crab.particles = [];
+    crab.maxMinions = 8;
+
+    // Reset crab2
+    crab2.alive = false;
+    crab2.deathCount = 0;
+    crab2.deathFrame = 0;
+    crab2.spawnCooldown = 0;
+
+    // Reset score + minions
+    score = 0;
+    minions.length = 0;
+    godCrabs.length = 0;
+    minionFusionTimer = 0;
+
+    // Reset squid
+    squid.alive = false;
+    // squid.anger is FOREVER — never reset
+    squid.size = 35;
+    squid.cursorPushStrength = 0.15;
+
+    // Reset timers
+    messageTimer = 0;
+    idleTimer = 0;
+    panicTimer = 0;
+    sandcastle.clicks = [];
+    sandcastle.summoned = false;
+    secondGod = false;
+    gameOver = false;
+    gameOverMsg = '';
+    gameOverSubmsg = '';
+
+    // Update HUD
+    scoreEl.textContent = 'SCORE: 0';
+    deathEl.textContent = 'DEATHS: 0';
+    minionEl.textContent = 'MINIONS: 0';
+    godEl.textContent = 'GODS: 1';
+    squidStatusEl.textContent = '';
+
+    showMessage("AGAIN.", '#FFD700', 1.5);
+}
+
+// ── Draw Crab ──
+function drawCrab(x, y, size, color, isPanic, isMain) {
+    const s = size;
+    const now = Date.now();
+
+    // Invincibility flash (main crab only)
+    if (isMain && now < crab.invincibleUntil && Math.floor(now / 80) % 2 === 0) return;
+
+    // Shadow
+    ctx.beginPath();
+    ctx.ellipse(x, y + s * 0.55, s * 0.75, s * 0.18, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fill();
+
+    // Trapdoor animation (main crab only)
+    if (isMain && crab.trapdoorOpen > 0.01) {
+        const open = crab.trapdoorOpen;
+        const lift = open * s * 0.6;
+
+        // Bottom half (stays)
+        ctx.beginPath();
+        ctx.ellipse(x, y + lift * 0.1, s, s * 0.5, 0, 0.1, Math.PI - 0.1);
+        ctx.lineTo(x - s, y + s * 0.1);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Top half (lifts up)
+        ctx.save();
+        ctx.translate(0, -lift);
+        ctx.beginPath();
+        ctx.ellipse(x, y - s * 0.15, s, s * 0.5, 0, Math.PI + 0.1, -0.1);
+        ctx.lineTo(x + s, y + s * 0.1);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Inner glow when open
+        if (open > 0.3) {
+            ctx.beginPath();
+            ctx.ellipse(x, y, s * 0.5, s * 0.2, 0, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(255, 200, 50, ${open * 0.4})`;
+            ctx.fill();
+        }
+        ctx.restore();
+
+        // "Something inside" indicator
+        if (open > 0.2 && open < 0.8) {
+            ctx.fillStyle = '#ffcc00';
+            ctx.font = `${Math.floor(s * 0.3)}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.fillText('👀', x, y - s * 0.3 - lift);
+        }
+    } else {
+        // ── CARAPACE (main shell) ──
+        // Outer shell — wide, slightly pointed at front
+        ctx.beginPath();
+        ctx.moveTo(x + s * 0.9, y); // front point (rostrum)
+        ctx.quadraticCurveTo(x + s * 0.7, y - s * 0.55, x, y - s * 0.5);
+        ctx.quadraticCurveTo(x - s * 0.7, y - s * 0.55, x - s * 0.9, y);
+        ctx.quadraticCurveTo(x - s * 0.7, y + s * 0.45, x, y + s * 0.45);
+        ctx.quadraticCurveTo(x + s * 0.7, y + s * 0.45, x + s * 0.9, y);
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Shell segments (horizontal ridges)
+        ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+        ctx.lineWidth = 1;
+        for (let i = -2; i <= 2; i++) {
+            const segY = y + i * s * 0.12;
+            const segW = s * (0.8 - Math.abs(i) * 0.12);
+            ctx.beginPath();
+            ctx.ellipse(x, segY, segW, s * 0.04, 0, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        // Central ridge
+        ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x, y - s * 0.45);
+        ctx.lineTo(x, y + s * 0.4);
+        ctx.stroke();
+
+        // Shell bumps / texture
+        ctx.fillStyle = 'rgba(0,0,0,0.08)';
+        for (let i = 0; i < 5; i++) {
+            const bx = x + (Math.sin(i * 1.7) * s * 0.4);
+            const by = y + (Math.cos(i * 2.3) * s * 0.2);
+            ctx.beginPath();
+            ctx.arc(bx, by, s * 0.06, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    // ── LEGS (4 pairs, jointed) ──
+    const legCount = isMain ? 4 : 2;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < legCount; i++) {
+        const angle = (i / legCount) * 0.6 + 0.15; // spread angle
+        const wobble = isPanic ? Math.sin(now / 60 + i * 1.2) * (isMain ? 6 : 3) : Math.sin(now / 200 + i * 0.8) * 2;
+
+        // Left legs
+        const lBaseX = x - s * 0.75;
+        const lBaseY = y + s * (0.05 + i * 0.09);
+        const lMidX = lBaseX - s * 0.35 + wobble;
+        const lMidY = lBaseY + s * 0.15;
+        const lEndX = lMidX - s * 0.3 + wobble * 0.5;
+        const lEndY = lMidY + s * 0.25;
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = isMain ? 2.5 : 1.8;
+        ctx.beginPath();
+        ctx.moveTo(lBaseX, lBaseY);
+        ctx.lineTo(lMidX, lMidY);
+        ctx.lineTo(lEndX, lEndY);
+        ctx.stroke();
+
+        // Joint dot
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.beginPath();
+        ctx.arc(lMidX, lMidY, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Right legs (mirror)
+        const rBaseX = x + s * 0.75;
+        const rBaseY = y + s * (0.05 + i * 0.09);
+        const rMidX = rBaseX + s * 0.35 - wobble;
+        const rMidY = rBaseY + s * 0.15;
+        const rEndX = rMidX + s * 0.3 - wobble * 0.5;
+        const rEndY = rMidY + s * 0.25;
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = isMain ? 2.5 : 1.8;
+        ctx.beginPath();
+        ctx.moveTo(rBaseX, rBaseY);
+        ctx.lineTo(rMidX, rMidY);
+        ctx.lineTo(rEndX, rEndY);
+        ctx.stroke();
+
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.beginPath();
+        ctx.arc(rMidX, rMidY, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.lineCap = 'butt';
+
+    // ── CLAWS (pincers) ──
+    const clawY = isPanic ? y - s * 0.15 : y + s * 0.05;
+    const clawExt = isPanic ? s * 1.05 : s * 0.85;
+    drawClaw(x - clawExt, clawY, s, -1, color, isPanic, now);
+    drawClaw(x + clawExt, clawY, s, 1, color, isPanic, now);
+
+    // ── EYESTALKS ──
+    const eyeBaseY = y - s * 0.3;
+    const eyeOff = s * 0.18;
+    const stalkLen = isMain ? s * 0.45 : s * 0.35;
+    const eyeR = isPanic ? s * 0.14 : s * 0.1;
+
+    // Stalks grow upward, slight sway
+    const sway = isPanic ? Math.sin(now / 80) * 3 : Math.sin(now / 400) * 1;
+
+    // Left eyestalk
+    ctx.strokeStyle = color;
+    ctx.lineWidth = isMain ? 3 : 2;
+    ctx.beginPath();
+    ctx.moveTo(x - eyeOff, eyeBaseY);
+    ctx.quadraticCurveTo(x - eyeOff + sway, eyeBaseY - stalkLen * 0.6, x - eyeOff + sway * 1.5, eyeBaseY - stalkLen);
+    ctx.stroke();
+
+    // Right eyestalk
+    ctx.beginPath();
+    ctx.moveTo(x + eyeOff, eyeBaseY);
+    ctx.quadraticCurveTo(x + eyeOff + sway, eyeBaseY - stalkLen * 0.6, x + eyeOff + sway * 1.5, eyeBaseY - stalkLen);
+    ctx.stroke();
+
+    // Eye bulbs
+    const eyeTopY = eyeBaseY - stalkLen;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(x - eyeOff + sway * 1.5, eyeTopY, eyeR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(x + eyeOff + sway * 1.5, eyeTopY, eyeR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // Pupils — track mouse
+    const dx = mouseX - x, dy = mouseY - y;
+    const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
+    const px = (dx / dist) * eyeR * 0.35;
+    const py = (dy / dist) * eyeR * 0.35;
+    const pupilR = eyeR * 0.55;
+
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(x - eyeOff + sway * 1.5 + px, eyeTopY + py, pupilR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + eyeOff + sway * 1.5 + px, eyeTopY + py, pupilR, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eye highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.beginPath();
+    ctx.arc(x - eyeOff + sway * 1.5 + px - pupilR * 0.3, eyeTopY + py - pupilR * 0.3, pupilR * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + eyeOff + sway * 1.5 + px - pupilR * 0.3, eyeTopY + py - pupilR * 0.3, pupilR * 0.3, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── MOUTH / MANDIBLES ──
+    if (isMain) {
+        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+        ctx.lineWidth = 1.5;
+        // Small chelicerae at front
+        const mouthY = y + s * 0.35;
+        ctx.beginPath();
+        ctx.moveTo(x - s * 0.08, mouthY);
+        ctx.lineTo(x - s * 0.15, mouthY + s * 0.08);
+        ctx.lineTo(x - s * 0.05, mouthY + s * 0.12);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x + s * 0.08, mouthY);
+        ctx.lineTo(x + s * 0.15, mouthY + s * 0.08);
+        ctx.lineTo(x + s * 0.05, mouthY + s * 0.12);
+        ctx.stroke();
+    }
+
+    // ── ANTENNAE ──
+    if (isMain) {
+        const antBaseY = y - s * 0.35;
+        const antLen = s * 0.5;
+        const antWave = Math.sin(now / 150) * 5;
+
+        ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x - s * 0.1, antBaseY);
+        ctx.quadraticCurveTo(x - s * 0.3 + antWave, antBaseY - antLen * 0.5, x - s * 0.4 + antWave, antBaseY - antLen);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x + s * 0.1, antBaseY);
+        ctx.quadraticCurveTo(x + s * 0.3 + antWave, antBaseY - antLen * 0.5, x + s * 0.4 + antWave, antBaseY - antLen);
+        ctx.stroke();
+    }
+
+    // ── PANIC SWEAT (main only) ──
+    if (isMain && isPanic > 1.0) {
+        ctx.font = `${Math.max(8, Math.floor(s * 0.3))}px Arial`;
+        for (let i = 0; i < 3; i++) {
+            const sx = x + (Math.random() - 0.5) * s * 2;
+            const sy = y - s * 0.6 + (Math.random() - 0.5) * s;
+            ctx.fillText('💧', sx, sy);
+        }
+    }
+
+    // ── MINION LABEL ──
+    if (!isMain) {
+        ctx.fillStyle = 'rgba(255,255,255,0.3)';
+        ctx.font = `${Math.max(8, Math.floor(s * 0.4))}px Courier`;
+        ctx.textAlign = 'center';
+        ctx.fillText('minion', x, y + s * 0.9);
+    }
+}
+
+function drawClaw(x, y, s, dir, color, isPanic, now) {
+    // Arm segment
+    const armLen = s * 0.35;
+    const armEndX = x + dir * armLen * 0.4;
+    const armEndY = y - s * 0.2;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = s > 20 ? 3.5 : 2.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(armEndX, armEndY);
+    ctx.stroke();
+
+    // Pincer — open/close animation
+    const pincerOpen = isPanic ? 0.7 : 0.3 + Math.sin(now / 300) * 0.15;
+    const pincerLen = s * 0.3;
+    const pincerBaseX = armEndX;
+    const pincerBaseY = armEndY;
+
+    // Upper pincer
+    ctx.strokeStyle = color;
+    ctx.lineWidth = s > 20 ? 3 : 2;
+    ctx.beginPath();
+    ctx.moveTo(pincerBaseX, pincerBaseY);
+    ctx.quadraticCurveTo(
+        pincerBaseX + dir * pincerLen * 0.5,
+        pincerBaseY - pincerLen * pincerOpen,
+        pincerBaseX + dir * pincerLen,
+        pincerBaseY - pincerLen * 0.1
+    );
+    ctx.stroke();
+
+    // Lower pincer
+    ctx.beginPath();
+    ctx.moveTo(pincerBaseX, pincerBaseY);
+    ctx.quadraticCurveTo(
+        pincerBaseX + dir * pincerLen * 0.5,
+        pincerBaseY + pincerLen * pincerOpen,
+        pincerBaseX + dir * pincerLen,
+        pincerBaseY + pincerLen * 0.1
+    );
+    ctx.stroke();
+
+    // Pincer tips — slight highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.beginPath();
+    ctx.arc(pincerBaseX + dir * pincerLen, pincerBaseY - pincerLen * 0.1, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(pincerBaseX + dir * pincerLen, pincerBaseY + pincerLen * 0.1, 1.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.lineCap = 'butt';
+}
+
+function drawDeath() {
+    const x = crab.x, y = crab.y, s = crab.size;
+
+    // Explosion particles
+    crab.particles.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.05;
+        p.life -= 0.02;
+        if (p.life > 0) {
+            ctx.globalAlpha = p.life;
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    });
+    ctx.globalAlpha = 1;
+
+    // Dead carapace (upside down feel — flipped ellipse)
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.9, y);
+    ctx.quadraticCurveTo(x + s * 0.7, y + s * 0.55, x, y + s * 0.5);
+    ctx.quadraticCurveTo(x - s * 0.7, y + s * 0.55, x - s * 0.9, y);
+    ctx.quadraticCurveTo(x - s * 0.7, y - s * 0.45, x, y - s * 0.45);
+    ctx.quadraticCurveTo(x + s * 0.7, y - s * 0.45, x + s * 0.9, y);
+    ctx.closePath();
+    ctx.fillStyle = '#550000';
+    ctx.fill();
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Shell segments on dead body
+    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+    ctx.lineWidth = 1;
+    for (let i = -1; i <= 1; i++) {
+        ctx.beginPath();
+        ctx.ellipse(x, y + i * s * 0.15, s * 0.6, s * 0.03, 0, 0, Math.PI * 2);
+        ctx.stroke();
+    }
+
+    // X eyes on drooping eyestalks
+    ctx.strokeStyle = '#ff0000';
+    ctx.lineWidth = 2.5;
+    const stalkBaseY = y - s * 0.25;
+    const droop = s * 0.15; // stalks droop down when dead
+
+    // Left eyestalk (drooping)
+    ctx.beginPath();
+    ctx.moveTo(x - s * 0.15, stalkBaseY);
+    ctx.quadraticCurveTo(x - s * 0.2, stalkBaseY + droop * 0.5, x - s * 0.2, stalkBaseY + droop);
+    ctx.stroke();
+    // X on eye
+    const lx = x - s * 0.2, ly = stalkBaseY + droop;
+    ctx.beginPath(); ctx.moveTo(lx - 5, ly - 5); ctx.lineTo(lx + 5, ly + 5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(lx + 5, ly - 5); ctx.lineTo(lx - 5, ly + 5); ctx.stroke();
+
+    // Right eyestalk (drooping)
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.15, stalkBaseY);
+    ctx.quadraticCurveTo(x + s * 0.2, stalkBaseY + droop * 0.5, x + s * 0.2, stalkBaseY + droop);
+    ctx.stroke();
+    const rx = x + s * 0.2, ry = stalkBaseY + droop;
+    ctx.beginPath(); ctx.moveTo(rx - 5, ry - 5); ctx.lineTo(rx + 5, ry + 5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(rx + 5, ry - 5); ctx.lineTo(rx - 5, ry + 5); ctx.stroke();
+
+    // Legs splayed out in death (4 pairs, jointed)
+    ctx.strokeStyle = '#550000';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 4; i++) {
+        const legY = y + s * (0.05 + i * 0.08);
+        const flail = Math.sin(crab.deathFrame * 0.15 + i) * s * 0.1;
+
+        // Left leg — splayed outward and up
+        const lMidX = x - s * 0.7 - s * 0.2;
+        const lMidY = legY - s * 0.1 + flail;
+        const lEndX = lMidX - s * 0.25;
+        const lEndY = lMidY - s * 0.15;
+        ctx.beginPath();
+        ctx.moveTo(x - s * 0.65, legY);
+        ctx.lineTo(lMidX, lMidY);
+        ctx.lineTo(lEndX, lEndY);
+        ctx.stroke();
+
+        // Right leg
+        const rMidX = x + s * 0.7 + s * 0.2;
+        const rMidY = legY - s * 0.1 - flail;
+        const rEndX = rMidX + s * 0.25;
+        const rEndY = rMidY - s * 0.15;
+        ctx.beginPath();
+        ctx.moveTo(x + s * 0.65, legY);
+        ctx.lineTo(rMidX, rMidY);
+        ctx.lineTo(rEndX, rEndY);
+        ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
+
+    // Claws limp at sides
+    ctx.strokeStyle = '#550000';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(x - s * 0.8, y + s * 0.1);
+    ctx.lineTo(x - s * 1.1, y + s * 0.3);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x + s * 0.8, y + s * 0.1);
+    ctx.lineTo(x + s * 1.1, y + s * 0.3);
+    ctx.stroke();
+
+    crab.deathFrame++;
+}
+
+// ── Game Loop ──
+// ── Beach Drawing Helpers ──
+function drawCloud(x, y, size) {
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.5, 0, Math.PI * 2);
+    ctx.arc(x + size * 0.4, y - size * 0.2, size * 0.4, 0, Math.PI * 2);
+    ctx.arc(x + size * 0.8, y, size * 0.45, 0, Math.PI * 2);
+    ctx.arc(x + size * 0.35, y + size * 0.1, size * 0.35, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+function drawSandcastle(x, y, scale) {
+    const s = scale;
+    ctx.fillStyle = '#D4A847';
+    ctx.strokeStyle = '#B8942E';
+    ctx.lineWidth = 1.5;
+
+    // Main tower
+    ctx.fillRect(x - 15 * s, y - 50 * s, 30 * s, 50 * s);
+    ctx.strokeRect(x - 15 * s, y - 50 * s, 30 * s, 50 * s);
+
+    // Battlements
+    for (let i = 0; i < 3; i++) {
+        ctx.fillRect(x - 15 * s + i * 12 * s, y - 60 * s, 8 * s, 10 * s);
+    }
+
+    // Side towers
+    ctx.fillRect(x - 35 * s, y - 30 * s, 20 * s, 30 * s);
+    ctx.strokeRect(x - 35 * s, y - 30 * s, 20 * s, 30 * s);
+    ctx.fillRect(x + 15 * s, y - 30 * s, 20 * s, 30 * s);
+    ctx.strokeRect(x + 15 * s, y - 30 * s, 20 * s, 30 * s);
+
+    // Door
+    ctx.fillStyle = '#8B6914';
+    ctx.beginPath();
+    ctx.arc(x, y - 5 * s, 7 * s, Math.PI, 0);
+    ctx.fillRect(x - 7 * s, y - 5 * s, 14 * s, 10 * s);
+    ctx.fill();
+
+    // Flag
+    ctx.strokeStyle = '#8B4513';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x, y - 60 * s);
+    ctx.lineTo(x, y - 80 * s);
+    ctx.stroke();
+    ctx.fillStyle = '#FF4444';
+    ctx.beginPath();
+    ctx.moveTo(x, y - 80 * s);
+    ctx.lineTo(x + 12 * s, y - 75 * s);
+    ctx.lineTo(x, y - 70 * s);
+    ctx.fill();
+}
+
+function drawShell(x, y, size, color) {
+    ctx.fillStyle = color;
+    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(x, y, size, size * 0.6, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    // Spiral lines
+    ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+    for (let i = 0; i < 4; i++) {
+        ctx.beginPath();
+        ctx.arc(x, y, size * (0.3 + i * 0.2), 0.5, 2.5);
+        ctx.stroke();
+    }
+}
+
+function drawStarfish(x, y, size, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    for (let i = 0; i < 5; i++) {
+        const angle = (i * 4 * Math.PI) / 5 - Math.PI / 2;
+        const px = x + Math.cos(angle) * size;
+        const py = y + Math.sin(angle) * size;
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+    // Center dot
+    ctx.fillStyle = 'rgba(0,0,0,0.15)';
+    ctx.beginPath();
+    ctx.arc(x, y, size * 0.25, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+function drawSeaweed(x, y) {
+    ctx.strokeStyle = '#2E8B57';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    const now = Date.now();
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    for (let i = 0; i < 6; i++) {
+        const sx = x + Math.sin(now * 0.002 + i * 0.8) * 8;
+        const sy = y - i * 10;
+        ctx.lineTo(sx, sy);
+    }
+    ctx.stroke();
+    // Leaves
+    ctx.fillStyle = '#3CB371';
+    for (let i = 1; i < 5; i += 2) {
+        const lx = x + Math.sin(now * 0.002 + i * 0.8) * 8;
+        const ly = y - i * 10;
+        ctx.beginPath();
+        ctx.ellipse(lx + 6, ly, 5, 3, 0.5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    ctx.lineCap = 'butt';
+}
+
+let lastTime = performance.now();
+let spawnAccum = 0;
+const gravity = 0.15;
+let secondGod = false;
+
+function gameLoop(now) {
+    const dt = Math.min((now - lastTime) / 1000, 0.1);
+    lastTime = now;
+
+    // ML training step — sets actions, auto-moves mouse
+    if (ML.enabled && !ML.paused) {
+        mlStep();
+    }
+
+    // Game Over check
+    if (gameOver) {
+        drawGameOver();
+        requestAnimationFrame(gameLoop);
+        return;
+    }
+
+    // ── Hold-to-kill ──
+    if (mouseDown && !gameOver && !ML.enabled) {
+        killCooldown = Math.max(0, killCooldown - dt);
+        if (killCooldown <= 0) {
+            tryKillAt(mouseX, mouseY);
+            killCooldown = KILL_RATE;
+        }
+    }
+
+    // Passive harassment scoring
+    if (!ML.enabled) {
+        passiveHarass(crab, dt);
+        passiveHarass(crab2, dt);
+        godCrabs.forEach(g => passiveHarass(g, dt));
+    }
+
+    // Minion fusion check
+    checkMinionFusion(dt);
+
+    // ── Squid step ──
+    squidStep(dt);
+
+    const w = canvas.width, h = canvas.height;
+
+    // ── God crab physics — full crabgod mechanics ──
+    for (const g of godCrabs) {
+        if (!g.alive) continue;
+
+        // ── Flee behavior (same as main crab) ──
+        const gdx = mouseX - g.x;
+        const gdy = mouseY - g.y;
+        const gDist = Math.sqrt(gdx * gdx + gdy * gdy);
+        const gFleeRadius = 80 + g.deathCount * 5;
+
+        if (gDist < gFleeRadius && gDist > 0) {
+            g.panicLevel = Math.min(g.panicLevel + 0.15, 2.0);
+            const fleeX = -gdx / gDist;
+            const fleeY = -gdy / gDist;
+            const speed = (gFleeRadius - gDist) * 1.5 * (1.0 + g.deathCount * 0.1);
+            g.vx += fleeX * speed * dt;
+            g.vy += fleeY * speed * dt;
+
+            // Panic insult
+            g.panicInsultCooldown = Math.max(0, g.panicInsultCooldown - dt);
+            if (g.panicInsultCooldown <= 0 && Math.random() < 0.02) {
+                showMessage(
+                    PANIC_INSULTS[Math.floor(Math.random() * PANIC_INSULTS.length)],
+                    '#ff8800', 1.2
+                );
+                g.panicInsultCooldown = 1.5;
+            }
+        } else {
+            g.panicLevel = Math.max(g.panicLevel - 0.05, 0.0);
+
+            // Idle drift
+            if (Math.random() < 0.03) {
+                g.vx += (Math.random() - 0.5) * 0.8;
+                g.vy += (Math.random() - 0.5) * 0.8;
+            }
+
+            // Idle insult
+            g.idleInsultCooldown = Math.max(0, g.idleInsultCooldown - dt);
+            if (g.panicLevel < 0.1 && g.idleInsultCooldown <= 0 && Math.random() < 0.002) {
+                showMessage(
+                    IDLE_INSULTS[Math.floor(Math.random() * IDLE_INSULTS.length)],
+                    g.color, 2.0
+                );
+                g.idleInsultCooldown = 3.0;
+            }
+        }
+
+        // ── Friction ──
+        g.vx *= 0.93;
+        g.vy *= 0.93;
+
+        // ── Movement (no gravity — floats like main crab) ──
+        g.x += g.vx;
+        g.y += g.vy;
+
+        // ── Screen wrap (all edges, like main crab) ──
+        if (g.x < -g.size) g.x = w + g.size;
+        if (g.x > w + g.size) g.x = -g.size;
+        if (g.y < -g.size) g.y = h + g.size;
+        if (g.y > h + g.size) g.y = -g.size;
+
+        // ── Spawn minions (with trapdoor timing) ──
+        if (!g.spawnCooldown) g.spawnCooldown = 0;
+        g.spawnCooldown = Math.max(0, g.spawnCooldown - dt);
+        if (g.spawnCooldown <= 0 && Math.random() < 0.03) {
+            const aliveCount = minions.filter(m => m.alive).length;
+            if (aliveCount < 40) {
+                const angle = Math.random() * Math.PI * 2;
+                const offset = g.size * 0.3;
+                const mx = g.x + Math.cos(angle) * offset;
+                const my = g.y - g.size * 0.4;
+                const minion = createMinion(mx, my, g.color);
+                minions.push(minion);
+                g.spawnCooldown = 3.0 - g.deathCount * 0.2;
+
+                // Show spawn insult sometimes
+                if (Math.random() < 0.15) {
+                    showMessage(
+                        SPAWN_INSULTS[Math.floor(Math.random() * SPAWN_INSULTS.length)],
+                        g.color, 1.5
+                    );
+                }
+            }
+        }
+
+        // ── Vibration when panicked ──
+        const gvibX = g.panicLevel > 0.5 ? (Math.random() - 0.5) * 6 * g.panicLevel : 0;
+        const gvibY = g.panicLevel > 0.5 ? (Math.random() - 0.5) * 6 * g.panicLevel : 0;
+        g._renderX = g.x + gvibX;
+        g._renderY = g.y + gvibY;
+    }
+
+    // ── Beach Background ── Sand on top, Ocean on bottom
+
+    // Sand (top 65%)
+    const sandEnd = h * 0.65;
+    const sandGrad = ctx.createLinearGradient(0, 0, 0, sandEnd);
+    sandGrad.addColorStop(0, '#F5DEB3');
+    sandGrad.addColorStop(0.3, '#F4D03F');
+    sandGrad.addColorStop(0.6, '#E8C84A');
+    sandGrad.addColorStop(1, '#DEB887');
+    ctx.fillStyle = sandGrad;
+    ctx.fillRect(0, 0, w, sandEnd);
+
+    // Wavy sand ridges
+    ctx.fillStyle = 'rgba(210, 170, 90, 0.25)';
+    for (let ridge = 0; ridge < 8; ridge++) {
+        const ridgeY = ridge * (sandEnd / 8);
+        ctx.beginPath();
+        for (let x = 0; x <= w; x += 4) {
+            const y = ridgeY + Math.sin((x + now * 0.015) * 0.008 + ridge) * 12 + Math.sin(x * 0.02) * 4;
+            x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.lineTo(w, ridgeY + 30);
+        ctx.lineTo(0, ridgeY + 30);
+        ctx.closePath();
+        ctx.fill();
+    }
+
+    // Sand texture
+    ctx.fillStyle = 'rgba(139, 119, 73, 0.12)';
+    for (let i = 0; i < 200; i++) {
+        const sx = (i * 73 + 17) % w;
+        const sy = (i * 47 + 31) % sandEnd;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 1 + (i % 2), 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Sun
+    const sunX = w * 0.82, sunY = h * 0.1;
+    const sunGrad = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 70);
+    sunGrad.addColorStop(0, 'rgba(255, 255, 120, 0.95)');
+    sunGrad.addColorStop(0.4, 'rgba(255, 220, 80, 0.4)');
+    sunGrad.addColorStop(1, 'rgba(255, 200, 50, 0)');
+    ctx.fillStyle = sunGrad;
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, 70, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#FFE44D';
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, 24, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Clouds
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    drawCloud(w * 0.15, h * 0.07, 35);
+    drawCloud(w * 0.5, h * 0.13, 28);
+
+    // Sandcastle
+    drawSandcastle(w * 0.08, sandEnd - 30, 0.6);
+
+    // Sandcastle click counter
+    if (!sandcastle.summoned && sandcastle.clicks.length > 0) {
+        const now = Date.now();
+        sandcastle.clicks = sandcastle.clicks.filter(t => now - t < sandcastle.window);
+        if (sandcastle.clicks.length > 0) {
+            ctx.fillStyle = '#8B4513';
+            ctx.font = 'bold 14px Courier New';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${sandcastle.clicks.length}/${sandcastle.threshold}`, w * 0.08, sandEnd + 20);
+            // Glow when close
+            if (sandcastle.clicks.length >= 7) {
+                ctx.fillStyle = `rgba(255, 100, 0, ${0.3 + Math.sin(now * 0.01) * 0.2})`;
+                ctx.beginPath();
+                ctx.arc(w * 0.08, sandEnd - 30, 35, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+    }
+    // Always show castle crab count
+    if (godCrabs.length > 0 || crab2.alive) {
+        ctx.fillStyle = '#FF6600';
+        ctx.font = 'bold 12px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText(`× ${1 + godCrabs.length}`, w * 0.08, sandEnd + 20);
+    }
+
+    // Seashells on sand
+    drawShell(w * 0.3, sandEnd - 50, 7, '#FFB6C1');
+    drawShell(w * 0.7, sandEnd - 35, 6, '#FFDAB9');
+    drawShell(w * 0.9, sandEnd - 55, 5, '#E6E6FA');
+
+    // Starfish
+    drawStarfish(w * 0.45, sandEnd - 45, 9, '#FF6347');
+
+    // Footprints in sand
+    ctx.fillStyle = 'rgba(139, 119, 73, 0.2)';
+    for (let i = 0; i < 4; i++) {
+        const fx = w * 0.55 + i * 30;
+        const fy = sandEnd - 70 + Math.sin(i * 0.9) * 8;
+        ctx.beginPath();
+        ctx.ellipse(fx, fy, 4, 7, 0.2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.ellipse(fx + 10, fy + 12, 4, 7, -0.2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // ── Ocean (bottom 35%) ──
+    const oceanStart = sandEnd;
+    const oceanGrad = ctx.createLinearGradient(0, oceanStart, 0, h);
+    oceanGrad.addColorStop(0, '#5BA3D9');
+    oceanGrad.addColorStop(0.2, '#2E8B57');
+    oceanGrad.addColorStop(0.5, '#1E90FF');
+    oceanGrad.addColorStop(0.8, '#1565C0');
+    oceanGrad.addColorStop(1, '#0D47A1');
+    ctx.fillStyle = oceanGrad;
+    ctx.fillRect(0, oceanStart, w, h - oceanStart);
+
+    // Animated waves
+    for (let wave = 0; wave < 6; wave++) {
+        const waveY = oceanStart + 5 + wave * 18;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.35 - wave * 0.04})`;
+        ctx.lineWidth = 2.5 - wave * 0.3;
+        ctx.beginPath();
+        for (let x = 0; x <= w; x += 3) {
+            const y = waveY + Math.sin((x + now * (0.025 + wave * 0.008)) * 0.015) * (8 - wave)
+                    + Math.sin((x + now * 0.04) * 0.03) * 3;
+            x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+
+    // Foam at shoreline
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    for (let i = 0; i < w; i += 8) {
+        const foamY = oceanStart + Math.sin((i + now * 0.03) * 0.02) * 4;
+        ctx.beginPath();
+        ctx.arc(i, foamY, 3 + Math.sin(i * 0.1) * 2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Seaweed in water
+    drawSeaweed(w * 0.2, oceanStart + 30);
+    drawSeaweed(w * 0.6, oceanStart + 20);
+    drawSeaweed(w * 0.85, oceanStart + 40);
+
+    // ── Main Crab Physics ──
+    if (crab.alive) {
+        if (!ML.enabled) {
+            // Normal flee behavior
+            const dx = mouseX - crab.x;
+            const dy = mouseY - crab.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const fleeRadius = 80 + crab.deathCount * 5;
+
+            if (dist < fleeRadius && dist > 0) {
+                const wasCalm = crab.panicLevel < 0.3;
+                crab.panicLevel = Math.min(crab.panicLevel + 0.15, 2.0);
+                const fleeX = -dx / dist;
+                const fleeY = -dy / dist;
+                const speed = (fleeRadius - dist) * 2.0 * (1.0 + crab.deathCount * 0.15);
+                crab.vx += fleeX * speed * dt;
+                crab.vy += fleeY * speed * dt;
+
+                // Score bump on first panic trigger
+                if (wasCalm && crab.panicLevel >= 0.3) {
+                    score += 15;
+                    scoreEl.textContent = `SCORE: ${score}`;
+                }
+
+                statusEl.textContent = 'STATUS: PANIC';
+                statusEl.style.color = '#ff0000';
+
+                if (panicTimer <= 0 && Math.random() < 0.03) {
+                    showMessage(
+                        PANIC_INSULTS[Math.floor(Math.random() * PANIC_INSULTS.length)],
+                        '#ff8800', 1.5
+                    );
+                    panicTimer = 1.5;
+                }
+            } else {
+                crab.panicLevel = Math.max(crab.panicLevel - 0.05, 0.0);
+                if (Math.random() < 0.03) {
+                    crab.vx += (Math.random() - 0.5) * 0.8;
+                    crab.vy += (Math.random() - 0.5) * 0.8;
+                }
+                statusEl.textContent = 'STATUS: NOMINAL';
+                statusEl.style.color = '#00ff41';
+            }
+        } else {
+            // ML mode — brain controls movement, still update panic for visuals
+            const dist = Math.sqrt(Math.pow(mouseX - crab.x, 2) + Math.pow(mouseY - crab.y, 2));
+            crab.panicLevel = dist < 130 ? Math.min(crab.panicLevel + 0.1, 2.0) : Math.max(crab.panicLevel - 0.05, 0.0);
+            statusEl.textContent = `STATUS: CHITIN-611 ACTIVE | EPS: ${ML.epsilon.toFixed(2)}`;
+            statusEl.style.color = '#0D47A1';
+        }
+
+        crab.vx *= 0.93;
+        crab.vy *= 0.93;
+
+        crab.x += crab.vx;
+        crab.y += crab.vy;
+
+        // Screen wrap — retreat off one edge, pop out the other
+        if (crab.x < -crab.size) crab.x = w + crab.size;
+        if (crab.x > w + crab.size) crab.x = -crab.size;
+        if (crab.y < -crab.size) crab.y = h + crab.size;
+        if (crab.y > h + crab.size) crab.y = -crab.size;
+
+        // ── Spawn Logic ──
+        crab.spawnCooldown = Math.max(0, crab.spawnCooldown - dt);
+        // Spawn chance increases with death count and panic
+        const spawnRate = 0.15 + crab.deathCount * 0.02 + crab.panicLevel * 0.08;
+        if (crab.spawnCooldown <= 0) {
+            spawnAccum += spawnRate * dt;
+            if (spawnAccum >= 1.0) {
+                spawnAccum = 0;
+                crab.spawnCooldown = 1.5 - crab.deathCount * 0.1; // faster at higher deaths
+                spawnMinion();
+            }
+        }
+
+        // ── Trapdoor Animation ──
+        if (crab.trapdoorTimer > 0) {
+            crab.trapdoorTimer -= dt;
+            if (crab.trapdoorTimer <= 0) {
+                spawnMinionActual();
+            }
+        }
+        // Smooth trapdoor open/close
+        const trapSpeed = 4.0;
+        if (crab.trapdoorOpen < crab.trapdoorTarget) {
+            crab.trapdoorOpen = Math.min(crab.trapdoorOpen + trapSpeed * dt, crab.trapdoorTarget);
+        } else if (crab.trapdoorOpen > crab.trapdoorTarget) {
+            crab.trapdoorOpen = Math.max(crab.trapdoorOpen - trapSpeed * dt, crab.trapdoorTarget);
+        }
+
+        // Idle insults
+        if (crab.panicLevel < 0.1 && idleTimer <= 0 && Math.random() < 0.003) {
+            showMessage(
+                IDLE_INSULTS[Math.floor(Math.random() * IDLE_INSULTS.length)],
+                '#00ff41', 2.5
+            );
+            idleTimer = 3.0;
+        }
+
+        // Vibration
+        const vibX = crab.panicLevel > 0.5 ? (Math.random() - 0.5) * 6 * crab.panicLevel : 0;
+        const vibY = crab.panicLevel > 0.5 ? (Math.random() - 0.5) * 6 * crab.panicLevel : 0;
+
+        drawCrab(crab.x + vibX, crab.y + vibY, crab.size, crab.color, crab.panicLevel, true);
+    } else {
+        drawDeath();
+    }
+
+    // ── Crab God 2 Physics ──
+    if (crab2.alive) {
+        const dx2 = mouseX - crab2.x;
+        const dy2 = mouseY - crab2.y;
+        const dist2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+        const fleeR2 = 80;
+
+        if (dist2 < fleeR2 && dist2 > 0) {
+            crab2.panicLevel = Math.min(crab2.panicLevel + 0.15, 2.0);
+            const fx = -dx2 / dist2, fy = -dy2 / dist2;
+            const spd = (fleeR2 - dist2) * 1.8;
+            crab2.vx += fx * spd * dt;
+            crab2.vy += fy * spd * dt;
+        } else {
+            crab2.panicLevel = Math.max(crab2.panicLevel - 0.05, 0.0);
+            if (Math.random() < 0.03) {
+                crab2.vx += (Math.random() - 0.5) * 0.6;
+                crab2.vy += (Math.random() - 0.5) * 0.6;
+            }
+        }
+
+        crab2.vx *= 0.93;
+        crab2.vy *= 0.93;
+        crab2.x += crab2.vx;
+        crab2.y += crab2.vy;
+
+        // Screen wrap
+        if (crab2.x < -crab2.size) crab2.x = w + crab2.size;
+        if (crab2.x > w + crab2.size) crab2.x = -crab2.size;
+        if (crab2.y < -crab2.size) crab2.y = h + crab2.size;
+        if (crab2.y > h + crab2.size) crab2.y = -crab2.size;
+
+        const vibX2 = crab2.panicLevel > 0.5 ? (Math.random() - 0.5) * 6 * crab2.panicLevel : 0;
+        const vibY2 = crab2.panicLevel > 0.5 ? (Math.random() - 0.5) * 6 * crab2.panicLevel : 0;
+        drawCrab(crab2.x + vibX2, crab2.y + vibY2, crab2.size, crab2.color, crab2.panicLevel, true);
+
+        // Crown for sandcastle crab
+        if (crab2.hasCrown) {
+            const crownX = crab2.x + vibX2;
+            const crownY = crab2.y + vibY2 - crab2.size * 0.8;
+            const crownW = crab2.size * 0.9;
+            const crownH = crab2.size * 0.45;
+            const now = Date.now();
+
+            // Crown base
+            ctx.fillStyle = '#FFD700';
+            ctx.beginPath();
+            ctx.moveTo(crownX - crownW, crownY + crownH);
+            ctx.lineTo(crownX - crownW, crownY);
+            ctx.lineTo(crownX - crownW * 0.5, crownY + crownH * 0.3);
+            ctx.lineTo(crownX, crownY - crownH * 0.2);
+            ctx.lineTo(crownX + crownW * 0.5, crownY + crownH * 0.3);
+            ctx.lineTo(crownX + crownW, crownY);
+            ctx.lineTo(crownX + crownW, crownY + crownH);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = '#B8860B';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // Gems
+            ctx.fillStyle = '#ff0000';
+            ctx.beginPath();
+            ctx.arc(crownX, crownY + crownH * 0.4, crownH * 0.12, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#0066ff';
+            ctx.beginPath();
+            ctx.arc(crownX - crownW * 0.5, crownY + crownH * 0.5, crownH * 0.1, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(crownX + crownW * 0.5, crownY + crownH * 0.5, crownH * 0.1, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Sparkle
+            if (Math.floor(now / 300) % 4 === 0) {
+                ctx.fillStyle = '#fff';
+                ctx.font = `${Math.floor(crownH * 0.4)}px serif`;
+                ctx.textAlign = 'center';
+                ctx.fillText('✨', crownX + crownW * 0.3, crownY - crownH * 0.3);
+            }
+        }
+    }
+
+    // ── Crab2 minion spawning ──
+    if (crab2.alive) {
+        crab2.spawnCooldown = Math.max(0, crab2.spawnCooldown - dt);
+        const spawnRate = 0.12 + crab2.deathCount * 0.015;
+        if (crab2.spawnCooldown <= 0) {
+            crab2.spawnAccum += spawnRate * dt;
+            if (crab2.spawnAccum >= 1.0) {
+                crab2.spawnAccum = 0;
+                crab2.spawnCooldown = 2.0 - crab2.deathCount * 0.15;
+                // Spawn minion from crab2
+                const angle = Math.random() * Math.PI * 2;
+                const offset = crab2.size * 0.3;
+                const mx = crab2.x + Math.cos(angle) * offset;
+                const my = crab2.y - crab2.size * 0.4 + Math.sin(angle) * offset * 0.3;
+                if (minions.filter(m => m.alive).length < crab2.maxMinions) {
+                    const minion = createMinion(mx, my, crab2.color);
+                    minions.push(minion);
+                    minionEl.textContent = `MINIONS: ${minions.filter(m => m.alive).length}`;
+                }
+            }
+        }
+
+        // Castle crab self-replication — spawns more castle crabs!
+        if (!crab2.replicateTimer) crab2.replicateTimer = 0;
+        crab2.replicateTimer += dt;
+        if (crab2.replicateTimer >= 12.0 && godCrabs.length < 20) {
+            crab2.replicateTimer = 0;
+            // Spawn a new god crab near the castle crab
+            const newGod = {
+                x: crab2.x + (Math.random() - 0.5) * 100,
+                y: crab2.y + (Math.random() - 0.5) * 60,
+                vx: (Math.random() - 0.5) * 4,
+                vy: -2,
+                size: 20 + Math.random() * 8,
+                color: hslToHex(Math.random() * 360, 80, 50),
+                alive: true,
+                panicLevel: 0,
+                deathCount: 0,
+                invincibleUntil: Date.now() + 3000,
+                hasCrown: Math.random() < 0.3,
+                spawnCooldown: 0,
+                replicateTimer: 0,
+                panicInsultCooldown: 0,
+                idleInsultCooldown: 0,
+            };
+            godCrabs.push(newGod);
+            score += 10;
+            scoreEl.textContent = `SCORE: ${score}`;
+            showMessage("THE CASTLE SPREADS.", '#FF6600', 1.5);
+        }
+    }
+
+    // Crab2 particles
+    crab2.particles.forEach(p => {
+        p.x += p.vx; p.y += p.vy; p.vy += 0.03; p.life -= 0.015;
+        if (p.life > 0) {
+            ctx.globalAlpha = p.life;
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    });
+    ctx.globalAlpha = 1;
+    crab2.particles = crab2.particles.filter(p => p.life > 0);
+
+    // ── Minion Physics ──
+    for (let i = minions.length - 1; i >= 0; i--) {
+        const m = minions[i];
+        if (!m.alive) {
+            m.life -= dt * 2;
+            m.vy += 0.1; // gravity on dead minions
+            m.x += m.vx;
+            m.y += m.vy;
+            if (m.life <= 0) { minions.splice(i, 1); continue; }
+            ctx.globalAlpha = m.life;
+            drawCrab(m.x, m.y, m.size * m.life, m.color, false, false);
+            ctx.globalAlpha = 1;
+            continue;
+        }
+
+        m.age += dt;
+        m.wobble += dt * 5;
+
+        // Simple flee from cursor
+        const mdx = mouseX - m.x;
+        const mdy = mouseY - m.y;
+        const mDist = Math.sqrt(mdx * mdx + mdy * mdy);
+        if (mDist < 80 && mDist > 0) {
+            m.vx += (-mdx / mDist) * 1.5 * dt * 60;
+            m.vy += (-mdy / mDist) * 1.5 * dt * 60;
+        }
+
+        // Random drift
+        if (Math.random() < 0.02) {
+            m.vx += (Math.random() - 0.5) * 0.5;
+            m.vy += (Math.random() - 0.5) * 0.5;
+        }
+
+        // Friction
+        m.vx *= 0.95;
+        m.vy *= 0.95;
+
+        m.x += m.vx;
+        m.y += m.vy;
+
+        // Screen wrap
+        if (m.x < -m.size) m.x = w + m.size;
+        if (m.x > w + m.size) m.x = -m.size;
+        if (m.y < -m.size) m.y = h + m.size;
+        if (m.y > h + m.size) m.y = -m.size;
+
+        // Fade in
+        m.life = Math.min(1.0, m.life + dt * 3);
+
+        ctx.globalAlpha = m.life;
+        const mPanic = mDist < 80 ? 1.0 : 0.0;
+        drawCrab(m.x, m.y, m.size, m.color, mPanic, false);
+        ctx.globalAlpha = 1;
+    }
+
+    // ── Particles (main crab) ──
+    crab.particles.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.03;
+        p.life -= 0.015;
+        if (p.life > 0) {
+            ctx.globalAlpha = p.life;
+            ctx.fillStyle = p.color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    });
+    ctx.globalAlpha = 1;
+    // Clean particles
+    crab.particles = crab.particles.filter(p => p.life > 0);
+
+    // ── God Crabs (draw + physics already done above) ──
+    for (const g of godCrabs) {
+        if (!g.alive) continue;
+        const now2 = Date.now();
+        const invFlash = g.invincibleUntil > now2 && Math.floor(now2 / 100) % 2;
+        // Use vibration coordinates from physics
+        const gx = g._renderX !== undefined ? g._renderX : g.x;
+        const gy = g._renderY !== undefined ? g._renderY : g.y;
+        if (!invFlash) {
+            drawCrab(gx, gy, g.size, g.color, g.panicLevel, false);
+        }
+        // Crown for castle crabs
+        if (g.hasCrown && !invFlash) {
+            const crownX = gx;
+            const crownY = gy - g.size * 0.8;
+            const crownW = g.size * 0.9;
+            const crownH = g.size * 0.45;
+
+            ctx.fillStyle = '#FFD700';
+            ctx.beginPath();
+            ctx.moveTo(crownX - crownW, crownY + crownH);
+            ctx.lineTo(crownX - crownW, crownY);
+            ctx.lineTo(crownX - crownW * 0.5, crownY + crownH * 0.3);
+            ctx.lineTo(crownX, crownY - crownH * 0.2);
+            ctx.lineTo(crownX + crownW * 0.5, crownY + crownH * 0.3);
+            ctx.lineTo(crownX + crownW, crownY);
+            ctx.lineTo(crownX + crownW, crownY + crownH);
+            ctx.closePath();
+            ctx.fill();
+            ctx.strokeStyle = '#B8860B';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            ctx.fillStyle = '#ff0000';
+            ctx.beginPath();
+            ctx.arc(crownX, crownY + crownH * 0.4, crownH * 0.12, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#0066ff';
+            ctx.beginPath();
+            ctx.arc(crownX - crownW * 0.5, crownY + crownH * 0.5, crownH * 0.1, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(crownX + crownW * 0.5, crownY + crownH * 0.5, crownH * 0.1, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+    // Remove dead gods
+    for (let i = godCrabs.length - 1; i >= 0; i--) {
+        if (!godCrabs[i].alive && godCrabs[i].deathCount > 0) godCrabs.splice(i, 1);
+    }
+    godEl.textContent = `GODS: ${(crab2.alive ? 1 : 0) + godCrabs.length}`;
+
+    // ── Squid ──
+    drawSquid();
+
+    // Timers
+    messageTimer = Math.max(0, messageTimer - dt);
+    idleTimer = Math.max(0, idleTimer - dt);
+    panicTimer = Math.max(0, panicTimer - dt);
+    if (messageTimer <= 0) msgEl.classList.remove('visible');
+
+    // Title
+    ctx.fillStyle = '#0D47A1';
+    ctx.font = 'bold 48px Courier New';
+    ctx.textAlign = 'center';
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 4;
+    ctx.strokeText('CRAB GOD', w / 2, 45);
+    ctx.shadowColor = '#00000080';
+    ctx.shadowBlur = 12;
+    ctx.shadowOffsetX = 3;
+    ctx.shadowOffsetY = 3;
+    ctx.fillText('CRAB GOD', w / 2, 45);
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+
+    // Minion count in HUD
+    const aliveMinions = minions.filter(m => m.alive).length;
+    minionEl.textContent = `MINIONS: ${aliveMinions}`;
+
+    // ── Custom cursor (drawn at squid-modified mouseX/mouseY) ──
+    if (!gameOver) {
+        ctx.strokeStyle = mouseDown ? '#ff0000' : 'rgba(0, 240, 255, 0.8)';
+        ctx.lineWidth = mouseDown ? 2 : 1.5;
+        // Circle
+        ctx.beginPath();
+        ctx.arc(mouseX, mouseY, mouseDown ? 15 : 10, 0, Math.PI * 2);
+        ctx.stroke();
+        // Crosshair lines
+        const arm = mouseDown ? 20 : 14;
+        const gap = mouseDown ? 8 : 5;
+        ctx.beginPath();
+        ctx.moveTo(mouseX - arm, mouseY); ctx.lineTo(mouseX - gap, mouseY);
+        ctx.moveTo(mouseX + gap, mouseY); ctx.lineTo(mouseX + arm, mouseY);
+        ctx.moveTo(mouseX, mouseY - arm); ctx.lineTo(mouseX, mouseY - gap);
+        ctx.moveTo(mouseX, mouseY + gap); ctx.lineTo(mouseX, mouseY + arm);
+        ctx.stroke();
+        // Center dot
+        ctx.fillStyle = mouseDown ? '#ff0000' : 'rgba(0, 240, 255, 0.6)';
+        ctx.beginPath();
+        ctx.arc(mouseX, mouseY, 2, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // ── Key flash feedback ──
+    if (keyFlashTimer > 0) {
+        keyFlashTimer -= dt;
+        const alpha = Math.min(1, keyFlashTimer * 2);
+        ctx.fillStyle = `rgba(0, 240, 255, ${alpha})`;
+        ctx.font = 'bold 14px Courier New';
+        ctx.textAlign = 'center';
+        ctx.fillText(`[${keyFlashText}]`, mouseX, mouseY - 20);
+    }
+
+    requestAnimationFrame(gameLoop);
+}
+
+// ── Brain Persistence (localStorage) ──
+const BRAIN_STORAGE_KEY = 'chitin611_profile';
+
+function saveBrainState() {
+    if (!ML.brain) return;
+    try {
+        const state = {
+            brain: ML.brain.serialize(),
+            epsilon: ML.epsilon,
+            episode: ML.episode,
+            episodeRewards: ML.episodeRewards,
+            episodeSurvival: ML.episodeSurvival,
+            graphData: ML.graphData,
+            score: score,
+            deaths: crab.deathCount,
+        };
+        localStorage.setItem(BRAIN_STORAGE_KEY, JSON.stringify(state));
+    } catch (e) {
+        console.warn('Failed to save brain state:', e);
+    }
+}
+
+function loadBrainState() {
+    try {
+        const raw = localStorage.getItem(BRAIN_STORAGE_KEY);
+        if (!raw) return false;
+        const state = JSON.parse(raw);
+        if (!state.brain) return false;
+
+        ML.brain = new Chitin611(ML.stateSize, ML.hiddenSize, ML.actionSize);
+        ML.brain.deserialize(state.brain);
+        ML.epsilon = state.epsilon ?? 1.0;
+        ML.episode = state.episode ?? 0;
+        ML.episodeRewards = state.episodeRewards ?? [];
+        ML.episodeSurvival = state.episodeSurvival ?? [];
+        ML.graphData = state.graphData ?? [];
+        ML.graphCtx = document.getElementById('ml-graph')?.getContext('2d');
+
+        return true;
+    } catch (e) {
+        console.warn('Failed to load brain state:', e);
+        return false;
+    }
+}
+
+// ── Start ──
+const brainLoaded = loadBrainState();
+if (brainLoaded) {
+    showMessage(`CHITIN-611 RESTORED. EPISODE ${ML.episode}. EPSILON ${ML.epsilon.toFixed(2)}.`, '#0D47A1', 4.0);
+} else {
+    showMessage("i'm a crab. come at me.", '#00ff41', 3.0);
+}
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
